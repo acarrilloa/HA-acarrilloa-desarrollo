@@ -1,0 +1,19 @@
+{
+  "name": "Optimizador Batería OMIE",
+  "description": "Custom component para Home Assistant que optimiza la carga/descarga de baterías usando precios OMIE con resolución de 15 minutos (MTU15) y tarifa eléctrica española 2.0TD.",
+  "documentation": "https://github.com/acarr/optimizador-bateria-omie",
+  "repository": "https://github.com/acarr/optimizador-bateria-omie",
+  "bugs": "https://github.com/acarr/optimizador-bateria-omie/issues",
+  "license": "MIT",
+  "maintainer": "acarr",
+  "keywords": ["batería", "battery", "OMIE", "precios", "electricidad", "tarifa", "2.0TD", "MTU15"],
+  "categories": ["Energy", "Utility"],
+  "homeassistant": "2025.1.0",
+  "python_version": "3.13",
+  "domain": "optimizador_bateria_omie",
+  "render_readme": true,
+  "config_flow": true,
+  "requirements": ["voluptuous>=0.15.0"],
+  "codeowners": ["@acarr"],
+  "issue_tracker": "https://github.com/acarr/optimizador-bateria-omie/issues"
+}

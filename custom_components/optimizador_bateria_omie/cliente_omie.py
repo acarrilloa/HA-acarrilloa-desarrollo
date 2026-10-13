@@ -88,12 +88,61 @@ class ClienteOmie:
     async def _obtener_desde_integracion_omie(self, fecha: date) -> list:
         """Obtiene precios usando la integración OMIE."""
         _LOGGER.info(f"Obteniendo precios de OMIE para fecha: {fecha}")
+        fecha_str = fecha.strftime("%Y-%m-%d")
+        
+        # 1. Primero intentar leer de los nuevos sensores específicos
+        # sensor.omie_precios_de_es_hoy para hoy
+        if fecha == date.today():
+            sensor_entity_id = "sensor.omie_precios_de_es_hoy"
+            state = self.hass.states.get(sensor_entity_id)
+            if state is not None:
+                _LOGGER.info(f"Sensor {sensor_entity_id} encontrado, estado: {state.state}")
+                if state.attributes is not None:
+                    # Buscar el atributo 'precios' que contiene la lista
+                    for attr_name in ["precios", "prices", "data", "price_list"]:
+                        if attr_name in state.attributes:
+                            datos = state.attributes[attr_name]
+                            _LOGGER.info(f"Datos obtenidos de {sensor_entity_id}.{attr_name}: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
+                            if isinstance(datos, list) and len(datos) > 0:
+                                _LOGGER.info(f"Primer elemento: {datos[0]}")
+                            return datos
+        
+        # sensor.omie_precios_de_es_manana para mañana
+        if fecha == date.today() + timedelta(days=1):
+            sensor_entity_id = "sensor.omie_precios_de_es_manana"
+            state = self.hass.states.get(sensor_entity_id)
+            if state is not None:
+                _LOGGER.info(f"Sensor {sensor_entity_id} encontrado, estado: {state.state}")
+                if state.attributes is not None:
+                    for attr_name in ["precios", "prices", "data", "price_list"]:
+                        if attr_name in state.attributes:
+                            datos = state.attributes[attr_name]
+                            _LOGGER.info(f"Datos obtenidos de {sensor_entity_id}.{attr_name}: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
+                            if isinstance(datos, list) and len(datos) > 0:
+                                _LOGGER.info(f"Primer elemento: {datos[0]}")
+                            return datos
+        
+        # 2. Intentar leer del sensor general de precios al contado
+        sensor_entity_id = "sensor.omie_precio_al_contado_en_espana"
+        state = self.hass.states.get(sensor_entity_id)
+        
+        if state is not None:
+            _LOGGER.info(f"Sensor {sensor_entity_id} encontrado, estado: {state.state}")
+            if state.attributes is not None:
+                _LOGGER.info(f"Atributos disponibles: {list(state.attributes.keys())}")
+                for attr_name in ["precios", "prices", "data", "price_list", "hourly_prices"]:
+                    if attr_name in state.attributes:
+                        datos = state.attributes[attr_name]
+                        _LOGGER.info(f"Datos obtenidos de {sensor_entity_id}.{attr_name}: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
+                        if isinstance(datos, list) and len(datos) > 0:
+                            _LOGGER.info(f"Primer elemento: {datos[0]}")
+                        return datos
+        
+        # 3. Si no hay datos en sensores, intentar llamar al servicio omie.get_prices_for_date
         try:
-            # Llamar al servicio de la integración OMIE
-            service_data = {"date": fecha.strftime("%Y-%m-%d")}
-            
-            # Intentar obtener datos del servicio
+            service_data = {"date": fecha_str}
             _LOGGER.info(f"Llamando a servicio omie.get_prices_for_date con {service_data}")
+            
             try:
                 response = await self.hass.services.async_call(
                     domain="omie",
@@ -140,81 +189,10 @@ class ClienteOmie:
             # Si es otro tipo, convertir a lista
             _LOGGER.warning(f"Tipo de respuesta inesperado: {type(response)}, valor: {response}")
             return [response]
-
+            
         except Exception as e:
-            _LOGGER.error(f"Error al obtener datos de la integración OMIE: {e}")
-            raise ErrorIntegracionNoDisponible(f"Integración OMIE no disponible: {e}")
-        
-        # Si el servicio no devolvió datos o falló, intentar con sensores template
-        # Intentar primero con sensor.omie_precios_de_es_hoy (para la fecha solicitada)
-        if fecha == date.today():
-            sensor_hoy = "sensor.omie_precios_de_es_hoy"
-            state_hoy = self.hass.states.get(sensor_hoy)
-            if state_hoy is not None and state_hoy.attributes is not None and "precios" in state_hoy.attributes:
-                _LOGGER.info(f"Obteniendo precios de {sensor_hoy} para hoy")
-                return state_hoy.attributes["precios"]
-
-        # Intentar con sensor.omie_precios_de_es_manana (para mañana)
-        if fecha == date.today() + timedelta(days=1):
-            sensor_manana = "sensor.omie_precios_de_es_manana"
-            state_manana = self.hass.states.get(sensor_manana)
-            if state_manana is not None and state_manana.attributes is not None and "precios" in state_manana.attributes:
-                _LOGGER.info(f"Obteniendo precios de {sensor_manana} para mañana")
-                return state_manana.attributes["precios"]
-
-        # Intentar con sensor.omie_precios_es (formato antiguo con precios_ordenados)
-        sensor_precios_es = "sensor.omie_precios_es"
-        state_es = self.hass.states.get(sensor_precios_es)
-        if state_es is not None and state_es.attributes is not None and "precios_ordenados" in state_es.attributes:
-            _LOGGER.info(f"Obteniendo precios de 'precios_ordenados' del sensor {sensor_precios_es}")
-            precios_ordenados = state_es.attributes["precios_ordenados"]
-            datos_convertidos = []
-            for item in precios_ordenados:
-                hora_str = item.get("hora", "00:00")
-                precio = item.get("precio", 0.0)
-                try:
-                    hora, minuto = map(int, hora_str.split(":"))
-                    fecha_dt = datetime(fecha.year, fecha.month, fecha.day, hora, minuto)
-                    tz_ha = self.hass.config.time_zone
-                    if tz_ha and HAS_PYTZ:
-                        try:
-                            tz_local = pytz.timezone(tz_ha)
-                            fecha_local = tz_local.localize(fecha_dt)
-                            fecha_utc = fecha_local.astimezone(timezone.utc)
-                        except Exception as e:
-                            _LOGGER.warning(f"Error con TZ {tz_ha}: {e}, usando Europe/Madrid")
-                            madrid_tz = pytz.timezone('Europe/Madrid')
-                            fecha_local = madrid_tz.localize(fecha_dt)
-                            fecha_utc = fecha_local.astimezone(timezone.utc)
-                    elif HAS_PYTZ:
-                        madrid_tz = pytz.timezone('Europe/Madrid')
-                        fecha_local = madrid_tz.localize(fecha_dt)
-                        fecha_utc = fecha_local.astimezone(timezone.utc)
-                    else:
-                        _LOGGER.warning("pytz no disponible, asumiendo CEST (+02:00)")
-                        fecha_dt = fecha_dt.replace(tzinfo=timezone(timedelta(hours=2)))
-                        fecha_utc = fecha_dt.astimezone(timezone.utc)
-                    datos_convertidos.append({
-                        "start": fecha_utc.isoformat(),
-                        "end": (fecha_utc + timedelta(minutes=15)).isoformat(),
-                        "price": precio
-                    })
-                except Exception as e:
-                    _LOGGER.warning(f"Error parseando hora {hora_str}: {e}")
-                    continue
-            _LOGGER.info(f"Convertidos {len(datos_convertidos)} precios desde sensor template")
-            return datos_convertidos
-
-        # Intentar con sensor.omie_precio_al_contado_en_espana
-        sensor_entity_id = "sensor.omie_precio_al_contado_en_espana"
-        state = self.hass.states.get(sensor_entity_id)
-        if state is not None and state.attributes is not None:
-            for attr_name in ["prices", "data", "price_list", "hourly_prices"]:
-                if attr_name in state.attributes:
-                    _LOGGER.info(f"Obteniendo precios de '{attr_name}' del sensor {sensor_entity_id}")
-                    return state.attributes[attr_name]
-
-        raise ErrorIntegracionNoDisponible(f"Todas las fuentes de datos fallaron para {fecha}")
+            _LOGGER.error(f"Error al obtener datos del servicio OMIE: {e}")
+            raise ErrorIntegracionNoDisponible(f"Servicio OMIE no disponible: {e}")
 
     async def _obtener_desde_redata(self, fecha: date) -> list:
         """Obtiene precios desde REData (fallback)."""
@@ -250,7 +228,7 @@ class ClienteOmie:
         # Implementación placeholder para ESIOS
         return []
 
-    def _normalizar_a_15min(self, datos: list, fecha: date) -> list[Ranura]:
+    def _normalizar_a_15min(self, datos: list, fecha: date) -> list:
         """Normaliza datos a tramos de 15 minutos (96 tramos por día).
         
         Formato esperado de omie.get_prices_for_date:
@@ -394,7 +372,8 @@ class ClienteOmie:
                         start_dt = start_dt.astimezone(timezone.utc)
                     
                     precio = float(item.get("price", 0.0))
-                    _LOGGER.debug(f"Creando ranura: {start_dt.isoformat()} - {precio}€/kWh")
+                    _LOGGER.debug(f"Creando ranura: {start_dt.isoformat()} - {precio}")
+                    
                     # Obtener el end time si está disponible
                     end_str = item.get("end", "")
                     try:
@@ -465,7 +444,7 @@ class ClienteOmie:
         
         return ranuras
 
-    async def obtener_precios_del_dia(self, fecha: date) -> list[Ranura]:
+    async def obtener_precios_del_dia(self, fecha: date) -> list:
         """Obtiene los precios para un día específico."""
         def _read_cache():
             """Operación bloqueante: leer cache."""
@@ -474,8 +453,8 @@ class ClienteOmie:
                 with open(cache_file, "r", encoding="utf-8") as f:
                     return json.load(f)
             return None
-        
-        def _write_cache(ranuras: list[Ranura]):
+
+        def _write_cache(ranuras: list):
             """Operación bloqueante: escribir cache."""
             cache_file = self._dir_cache / f"{fecha.strftime('%Y-%m-%d')}.json"
             cache_data = [
@@ -490,7 +469,7 @@ class ClienteOmie:
             ]
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
-        
+
         # Verificar cache
         if self.config.usar_cache:
             try:
@@ -526,6 +505,7 @@ class ClienteOmie:
                 except Exception as e:
                     _LOGGER.warning(f"Error al obtener datos de OMIE: {e}")
                     _LOGGER.warning(f"Tipo de error: {type(e)}")
+                    
                     # Mensajes conocidos de error
                     if "have not been published yet" in str(e):
                         _LOGGER.warning("Los precios no están publicados aún, usando fallback REData")

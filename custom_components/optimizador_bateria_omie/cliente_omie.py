@@ -86,113 +86,45 @@ class ClienteOmie:
             self._dir_cache.mkdir(parents=True, exist_ok=True)
 
     async def _obtener_desde_integracion_omie(self, fecha: date) -> list:
-        """Obtiene precios usando la integración OMIE."""
-        _LOGGER.info(f"Obteniendo precios de OMIE para fecha: {fecha}")
-        fecha_str = fecha.strftime("%Y-%m-%d")
-        
-        # 1. Primero intentar leer de los nuevos sensores específicos
-        # sensor.omie_precios_de_es_hoy para hoy
-        if fecha == date.today():
+        """Obtiene precios usando los sensores de la plantilla OMIE."""
+        _LOGGER.info("Obteniendo precios de OMIE para fecha: %s", fecha)
+
+        hoy = date.today()
+        if fecha == hoy - timedelta(days=1):
+            sensor_entity_id = "sensor.omie_precios_de_es_ayer"
+        elif fecha == hoy:
             sensor_entity_id = "sensor.omie_precios_de_es_hoy"
-            state = self.hass.states.get(sensor_entity_id)
-            if state is not None:
-                _LOGGER.info(f"Sensor {sensor_entity_id} encontrado, estado: {state.state}")
-                if state.attributes is not None:
-                    # Buscar el atributo 'precios' que contiene la lista
-                    for attr_name in ["precios", "prices", "data", "price_list"]:
-                        if attr_name in state.attributes:
-                            datos = state.attributes[attr_name]
-                            _LOGGER.info(f"Datos obtenidos de {sensor_entity_id}.{attr_name}: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                            if isinstance(datos, list) and len(datos) > 0:
-                                _LOGGER.info(f"Primer elemento: {datos[0]}")
-                            return datos
-        
-        # sensor.omie_precios_de_es_manana para mañana
-        if fecha == date.today() + timedelta(days=1):
+        elif fecha == hoy + timedelta(days=1):
             sensor_entity_id = "sensor.omie_precios_de_es_manana"
-            state = self.hass.states.get(sensor_entity_id)
-            if state is not None:
-                _LOGGER.info(f"Sensor {sensor_entity_id} encontrado, estado: {state.state}")
-                if state.attributes is not None:
-                    for attr_name in ["precios", "prices", "data", "price_list"]:
-                        if attr_name in state.attributes:
-                            datos = state.attributes[attr_name]
-                            _LOGGER.info(f"Datos obtenidos de {sensor_entity_id}.{attr_name}: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                            if isinstance(datos, list) and len(datos) > 0:
-                                _LOGGER.info(f"Primer elemento: {datos[0]}")
-                            return datos
-        
-        # 2. Intentar leer del sensor general de precios al contado
-        sensor_entity_id = "sensor.omie_precio_al_contado_en_espana"
+        else:
+            _LOGGER.warning("Fecha %s fuera del rango de los sensores OMIE", fecha)
+            return []
+
         state = self.hass.states.get(sensor_entity_id)
-        
-        if state is not None:
-            _LOGGER.info(f"Sensor {sensor_entity_id} encontrado, estado: {state.state}")
-            if state.attributes is not None:
-                _LOGGER.info(f"Atributos disponibles: {list(state.attributes.keys())}")
-                for attr_name in ["precios", "prices", "data", "price_list", "hourly_prices"]:
-                    if attr_name in state.attributes:
-                        datos = state.attributes[attr_name]
-                        _LOGGER.info(f"Datos obtenidos de {sensor_entity_id}.{attr_name}: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                        if isinstance(datos, list) and len(datos) > 0:
-                            _LOGGER.info(f"Primer elemento: {datos[0]}")
-                        return datos
-        
-        # 3. Si no hay datos en sensores, intentar llamar al servicio omie.get_prices_for_date
-        try:
-            service_data = {"date": fecha_str}
-            _LOGGER.info(f"Llamando a servicio omie.get_prices_for_date con {service_data}")
-            
-            try:
-                response = await self.hass.services.async_call(
-                    domain="omie",
-                    service="get_prices_for_date",
-                    service_data=service_data,
-                    blocking=True,
-                    return_response=True,
+        if state is None:
+            _LOGGER.warning("Sensor %s no encontrado en el registro de estados", sensor_entity_id)
+            return []
+
+        _LOGGER.debug("Sensor %s encontrado, estado=%s", sensor_entity_id, state.state)
+
+        for attr_name in ("precios", "prices", "data", "price_list"):
+            datos = state.attributes.get(attr_name)
+            if isinstance(datos, list) and len(datos) > 0:
+                _LOGGER.info(
+                    "Datos válidos de %s.%s → %d intervalos. Primer elemento: %s",
+                    sensor_entity_id, attr_name, len(datos), datos[0],
                 )
-            except Exception as e:
-                _LOGGER.error(f"Error al llamar al servicio omie.get_prices_for_date: {e}")
-                raise ErrorIntegracionNoDisponible(f"Servicio no disponible: {e}")
-            
-            _LOGGER.info(f"Respuesta del servicio OMIE: tipo={type(response)}")
-            
-            if response is None:
-                _LOGGER.warning("El servicio devolvió None")
-                raise ErrorIntegracionNoDisponible("Servicio devolvió None")
-            
-            # Si la respuesta es una lista, devolverla directamente
-            if isinstance(response, list):
-                _LOGGER.info(f"Respuesta es una lista con {len(response)} elementos")
-                if response:
-                    _LOGGER.info(f"Primer elemento: {response[0]}")
-                return response
-            
-            # Si la respuesta es un diccionario, intentar extraer los datos
-            if isinstance(response, dict):
-                _LOGGER.info(f"Respuesta es un diccionario: {list(response.keys())}")
-                # El servicio OMIE devuelve {'es': [...], 'pt': [...], ...}
-                # Extraer los precios para España
-                if "es" in response:
-                    _LOGGER.info("Extrayendo datos de la clave 'es' (España)")
-                    return response["es"]
-                elif "data" in response:
-                    _LOGGER.info("Extrayendo datos de 'data'")
-                    return response["data"]
-                elif "prices" in response:
-                    _LOGGER.info("Extrayendo datos de 'prices'")
-                    return response["prices"]
-                else:
-                    _LOGGER.error(f"Diccionario no contiene claves esperadas. Claves disponibles: {list(response.keys())}")
-                    raise ErrorIntegracionNoDisponible(f"Formato de respuesta inesperado: {response}")
-            
-            # Si es otro tipo, convertir a lista
-            _LOGGER.warning(f"Tipo de respuesta inesperado: {type(response)}, valor: {response}")
-            return [response]
-            
-        except Exception as e:
-            _LOGGER.error(f"Error al obtener datos del servicio OMIE: {e}")
-            raise ErrorIntegracionNoDisponible(f"Servicio OMIE no disponible: {e}")
+                return datos
+            if attr_name in state.attributes:
+                _LOGGER.debug(
+                    "Atributo %s.%s presente pero vacío (%s)",
+                    sensor_entity_id, attr_name, type(datos).__name__,
+                )
+
+        # Ningún atributo con datos → devolvemos [] para que el llamador
+        # (obtener_precios_del_dia) intente REData / ESIOS como fallback.
+        _LOGGER.info("Sensor %s sin datos de precios todavía", sensor_entity_id)
+        return []
 
     async def _obtener_desde_redata(self, fecha: date) -> list:
         """Obtiene precios desde REData (fallback)."""
@@ -514,7 +446,7 @@ class ClienteOmie:
                         datos = None
             
             # Si no se obtuvieron datos de OMIE o OMIE no es la fuente prioritaria, usar fallback
-            if datos is None:
+            if not datos    # None o lista vacía
                 try:
                     datos = await self._obtener_desde_redata(fecha)
                     fuente = "redata"
@@ -523,7 +455,7 @@ class ClienteOmie:
                     _LOGGER.warning(f"Error al obtener datos de REData: {e}")
                     datos = None
                 
-                if datos is None:
+                if not datos:   # None o lista vacía
                     try:
                         datos = await self._obtener_desde_esios(fecha)
                         fuente = "esios"

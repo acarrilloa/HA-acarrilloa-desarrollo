@@ -1,0 +1,27 @@
+{
+  "title": "Optimizador Batería OMIE",
+  "description": "Componente para optimizar carga/descarga de batería usando precios OMIE con resolución de 15 minutos",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configuración inicial",
+        "description": "Configura la fuente de precios y parámetros de tarifa"
+      }
+    },
+    "options": {
+      "init": {
+        "title": "Opciones de configuración",
+        "description": "Ajusta parámetros de precios y tarifa"
+      }
+    }
+  },
+  "error": {
+    "fuente_invalida": "Fuente de precios no válida",
+    "error_desconocido": "Error desconocido durante la configuración"
+  },
+  "select": {
+    "omie": "Integración OMIE",
+    "redata": "REData (Red Eléctrica)",
+    "esios": "ESIOS"
+  }
+}

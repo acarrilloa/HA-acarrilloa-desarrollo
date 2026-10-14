@@ -23,7 +23,7 @@ ATTR_MEDIANA = "mediana"
 ATTR_FUENTE = "fuente"
 ATTR_TS_ACTUALIZACION = "ts_actualizacion"
 
-# Festivos nacionales España (dd-mm)
+# Festivos nacionales España (mm-dd)
 FESTIVOS_ESPANA = {
     (1, 1),   # Año Nuevo
     (1, 6),   # Día de Reyes

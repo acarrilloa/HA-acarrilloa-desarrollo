@@ -1,7 +1,8 @@
 """Entidades (sensores) para la integración Optimizador Batería OMIE."""
 
+from typing import ClassVar
+
 from homeassistant.const import (
-    CONF_NAME,
     CONF_UNIT_OF_MEASUREMENT,
     STATE_UNAVAILABLE,
 )
@@ -12,16 +13,16 @@ from homeassistant.helpers.update_coordinator import (
 )
 
 from custom_components.optimizador_bateria_omie.const import (
-    DOMAIN,
-    SENSOR_PRECIO_ACTUAL,
-    SENSOR_PRECIO_EFECTIVO,
-    SENSOR_PRECIO_CLASIFICACION,
-    SENSOR_PRECIO_ESTADISTICAS,
-    ATTR_MIN,
+    ATTR_FUENTE,
     ATTR_MAX,
     ATTR_MEDIANA,
-    ATTR_FUENTE,
+    ATTR_MIN,
     ATTR_TS_ACTUALIZACION,
+    DOMAIN,
+    SENSOR_PRECIO_ACTUAL,
+    SENSOR_PRECIO_CLASIFICACION,
+    SENSOR_PRECIO_EFECTIVO,
+    SENSOR_PRECIO_ESTADISTICAS,
 )
 from custom_components.optimizador_bateria_omie.coordinador import CoordinadorDatosOmie
 
@@ -48,7 +49,7 @@ class SensorBase(CoordinatorEntity):
 class SensorPrecioActual(SensorBase):
     """Sensor para el precio actual de la electricidad."""
 
-    _attr_templates = {
+    _attr_templates: ClassVar[dict] = {
         "friendly_name": "Precio actual",
         "unique_id": SENSOR_PRECIO_ACTUAL,
     }

@@ -4,6 +4,9 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant
+
 from custom_components.optimizador_bateria_omie.cliente_omie import Ranura
 from custom_components.optimizador_bateria_omie.coordinador import (
     CoordinadorDatosOmie,
@@ -15,8 +18,6 @@ from custom_components.optimizador_bateria_omie.entidades import (
     SensorPrecioEfectivo,
     SensorPrecioEstadisticas,
 )
-from homeassistant.const import STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant
 
 
 @pytest.fixture
@@ -93,7 +94,7 @@ class TestSensorPrecioActual:
 
     def test_unidad(self, sensor_precio_actual):
         """Test de unidad de medida."""
-        assert sensor_precio_actual.native_unit_of_measurement == "kWh"
+        assert sensor_precio_actual.native_unit_of_measurement == "€/kWh"
         assert (
             sensor_precio_actual.suggested_unit_of_measurement == "€"
         )
@@ -101,7 +102,7 @@ class TestSensorPrecioActual:
     def test_estado(self, sensor_precio_actual):
         """Test de estado."""
         # Mockear obtener_precio_actual para que devuelva un valor
-        sensor_precio_actual.coordinador.obtener_precio_actual = MagicMock(
+        sensor_precio_actual.coordinator.obtener_precio_actual = MagicMock(
             return_value=0.15
         )
         sensor_precio_actual.async_update()
@@ -111,7 +112,7 @@ class TestSensorPrecioActual:
 
     def test_disponibilidad(self, sensor_precio_actual):
         """Test de disponibilidad cuando no hay datos."""
-        sensor_precio_actual.coordinador.obtener_precio_actual = MagicMock(
+        sensor_precio_actual.coordinator.obtener_precio_actual = MagicMock(
             return_value=None
         )
         sensor_precio_actual.async_update()
@@ -133,10 +134,10 @@ class TestSensorPrecioEfectivo:
 
     def test_estado(self, sensor_precio_efectivo):
         """Test de estado."""
-        sensor_precio_efectivo.coordinador.obtener_precio_efectivo_actual = (
+        sensor_precio_efectivo.coordinator.obtener_precio_efectivo_actual = (
             MagicMock(return_value=0.20)
         )
-        sensor_precio_efectivo.coordinador.obtener_ranura_actual = MagicMock(
+        sensor_precio_efectivo.coordinator.obtener_ranura_actual = MagicMock(
             return_value=Ranura(
                 datetime.now(tz=timezone.utc),
                 0.15,
@@ -166,7 +167,7 @@ class TestSensorPrecioClasificacion:
 
     def test_estado(self, sensor_precio_clasificacion):
         """Test de estado."""
-        sensor_precio_clasificacion.coordinador.obtener_clasificacion_actual = (
+        sensor_precio_clasificacion.coordinator.obtener_clasificacion_actual = (
             MagicMock(return_value="punta")
         )
         sensor_precio_clasificacion.async_update()
@@ -190,7 +191,7 @@ class TestSensorPrecioEstadisticas:
 
     def test_estado(self, sensor_precio_estadisticas):
         """Test de estado."""
-        sensor_precio_estadisticas.coordinador.obtener_estadisticas_actual = (
+        sensor_precio_estadisticas.coordinator.obtener_estadisticas_actual = (
             MagicMock(return_value={"min": 0.10, "max": 0.30, "mediana": 0.20})
         )
         sensor_precio_estadisticas.async_update()

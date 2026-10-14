@@ -1,8 +1,10 @@
 """Fixtures para tests del componente optimizador_bateria_omie."""
 
-from unittest.mock import MagicMock
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
 from custom_components.optimizador_bateria_omie.cliente_omie import (
     ClienteOmie,
     ConfiguracionOmie,
@@ -10,13 +12,20 @@ from custom_components.optimizador_bateria_omie.cliente_omie import (
 
 
 @pytest.fixture
-def cliente_omie():
+def cliente_omie(tmp_path):
     """Fixture para ClienteOmie con configuración mock."""
     hass = MagicMock()
     hass.config = MagicMock()
     hass.config.components = ["omie"]
+    hass.config.config_dir = str(tmp_path)
     hass.services = MagicMock()
-    hass.services.async_call = MagicMock()
+    hass.states = MagicMock()
+
+    # async_add_executor_job ejecuta la función síncrona directamente
+    # en los tests (no hay event loop real que bloquear).
+    hass.async_add_executor_job = AsyncMock(
+        side_effect=lambda fn, *args: fn(*args)
+    )
 
     config = ConfiguracionOmie(
         fuente_prioritaria="omie",
@@ -24,14 +33,13 @@ def cliente_omie():
         dias_cache=7,
     )
 
-    return ClienteOmie(hass, config)
+    cliente = ClienteOmie(hass, config)
+    return cliente
 
 
 @pytest.fixture
 def fixture_respuesta_integracion_omie():
     """Fixture para respuesta de la integración OMIE (96 tramos normales)."""
-    from datetime import datetime, timezone
-
     hoy = datetime.now(tz=timezone.utc).date()
     respuesta = []
     for h in range(24):
@@ -50,8 +58,6 @@ def fixture_respuesta_integracion_omie():
 @pytest.fixture
 def fixture_respuesta_redata():
     """Fixture para respuesta de REData API."""
-    from datetime import datetime, timezone
-
     hoy = datetime.now(tz=timezone.utc).date()
     return {
         "data": [

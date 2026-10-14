@@ -1,11 +1,21 @@
 """Tests para ClienteOmie."""
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
 from custom_components.optimizador_bateria_omie.cliente_omie import (
-    ErrorIntegracionNoDisponible,
+    ErrorFuenteOmie,
 )
+
+
+def _estado_con_precios(precios):
+    """Crea un estado mock de HA con atributos de precios OMIE."""
+    state = MagicMock()
+    state.state = "on"
+    state.attributes = {"precios": precios}
+    return state
 
 
 @pytest.mark.asyncio
@@ -13,20 +23,14 @@ async def test_obtener_precios_del_dia_integracion(
     cliente_omie, fixture_respuesta_integracion_omie
 ):
     """Test de obtener precios usando la integración OMIE."""
-    # Mockear el servicio
-    async def mock_call(svc, service, data, blocking, return_response):
-        return fixture_respuesta_integracion_omie
-
-    cliente_omie.hass.services.async_call = AsyncMock(side_effect=mock_call)
-    cliente_omie.hass.config.components = ["omie"]
-
-    # Obtener precios
-    from datetime import datetime, timezone
-
     hoy = datetime.now(tz=timezone.utc).date()
+    cliente_omie.hass.config.components = ["omie"]
+    cliente_omie.hass.states.get = MagicMock(
+        return_value=_estado_con_precios(fixture_respuesta_integracion_omie)
+    )
+
     ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
 
-    # Verificar
     assert len(ranuras) == 96  # Normalizado a 96 tramos
     assert ranuras[0].fuente == "omie"
     assert isinstance(ranuras[0].precio_eur_kwh, float)
@@ -37,54 +41,45 @@ async def test_obtener_precios_del_dia_fallback_redata(
     cliente_omie, fixture_respuesta_redata
 ):
     """Test de fallback a REData cuando la integración OMIE no está disponible."""
-    # Mockear: integración OMIE no disponible
     cliente_omie.hass.config.components = []  # No tiene integración OMIE
 
-    # Mockear aiohttp
-    mock_session = MagicMock()
-    mock_response = MagicMock()
+    # Mock de la respuesta HTTP de REData
+    mock_response = AsyncMock()
     mock_response.status = 200
     mock_response.json = AsyncMock(return_value=fixture_respuesta_redata)
-    mock_session.get = AsyncMock(return_value=mock_response)
+    mock_response.__aenter__.return_value = mock_response
+    mock_session = MagicMock()
+    mock_session.get = MagicMock(return_value=mock_response)
 
     with patch.object(
-        cliente_omie, "_obtener_session_aiohttp", new_callable=AsyncMock
-    ) as mock_session_method:
-        mock_session_method.return_value = mock_session
-
-        from datetime import datetime, timezone
-
+        cliente_omie, "_obtener_session_aiohttp", new=AsyncMock(return_value=mock_session)
+    ):
         hoy = datetime.now(tz=timezone.utc).date()
         ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
 
-        # Verificar que se usó REData
-        assert len(ranuras) == 96
-        assert ranuras[0].fuente == "redata"
+    # Verificar que se usó REData
+    assert len(ranuras) == 96
+    assert ranuras[0].fuente == "redata"
 
 
 @pytest.mark.asyncio
 async def test_obtener_precios_del_dia_cache(
-    cliente_omie, fixture_respuesta_integracion_omie, tmp_path
+    cliente_omie, fixture_respuesta_integracion_omie
 ):
     """Test de que la cache evita llamadas repetidas."""
-    # Configurar directorio de cache temporal
-    cliente_omie._dir_cache = tmp_path
-
-    # Mockear el servicio
     call_count = 0
 
-    async def mock_call(svc, service, data, blocking, return_response):
+    def mock_states_get(entity_id):
         nonlocal call_count
         call_count += 1
-        return fixture_respuesta_integracion_omie
+        return _estado_con_precios(fixture_respuesta_integracion_omie)
 
-    cliente_omie.hass.services.async_call = AsyncMock(side_effect=mock_call)
-
-    from datetime import datetime, timezone
+    cliente_omie.hass.config.components = ["omie"]
+    cliente_omie.hass.states.get = MagicMock(side_effect=mock_states_get)
 
     hoy = datetime.now(tz=timezone.utc).date()
 
-    # Primera llamada - debe llamar al servicio
+    # Primera llamada - debe consultar el sensor OMIE
     ranuras1 = await cliente_omie.obtener_precios_del_dia(hoy)
     assert call_count == 1
 
@@ -101,16 +96,12 @@ async def test_normalizar_a_15min_horario(
     cliente_omie, fixture_respuesta_integracion_omie_horario
 ):
     """Test de normalización de día con cambio horario (92 tramos)."""
-    # Mockear el servicio con respuesta de 92 tramos
-    async def mock_call(svc, service, data, blocking, return_response):
-        return fixture_respuesta_integracion_omie_horario
-
-    cliente_omie.hass.services.async_call = AsyncMock(side_effect=mock_call)
     cliente_omie.hass.config.components = ["omie"]
+    cliente_omie.hass.states.get = MagicMock(
+        return_value=_estado_con_precios(fixture_respuesta_integracion_omie_horario)
+    )
 
-    from datetime import date
-
-    hoy = date(2025, 3, 30)
+    hoy = datetime.now(tz=timezone.utc).date()
     ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
 
     # Verificar que se normalizó a 96 tramos
@@ -118,13 +109,16 @@ async def test_normalizar_a_15min_horario(
 
 
 @pytest.mark.asyncio
-async def test_integracion_no_disponible(cliente_omie):
-    """Test de manejo de error cuando la integración OMIE no existe."""
+async def test_todas_las_fuentes_fallan(cliente_omie):
+    """Test de error cuando todas las fuentes fallan."""
     cliente_omie.hass.config.components = []  # No tiene integración OMIE
-
-    from datetime import datetime, timezone
 
     hoy = datetime.now(tz=timezone.utc).date()
 
-    with pytest.raises(ErrorIntegracionNoDisponible):
+    # REData falla (error de red) y ESIOS es un placeholder vacío
+    with patch.object(
+        cliente_omie,
+        "_obtener_session_aiohttp",
+        new=AsyncMock(side_effect=ErrorFuenteOmie("fallo de red")),
+    ), pytest.raises(ErrorFuenteOmie):
         await cliente_omie.obtener_precios_del_dia(hoy)

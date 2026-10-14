@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
@@ -11,7 +11,6 @@ from homeassistant.helpers.update_coordinator import (
 
 from custom_components.optimizador_bateria_omie.cliente_omie import (
     ClienteOmie,
-    ConfiguracionOmie,
     Ranura,
 )
 from custom_components.optimizador_bateria_omie.tarifa import ModeloTarifa
@@ -70,7 +69,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         _LOGGER.info("Actualizando datos de precios OMIE...")
         try:
             # Obtener precios de hoy y mañana
-            hoy = date.today()
+            hoy = datetime.now(tz=timezone.utc).date()
             manana = hoy + timedelta(days=1)
             _LOGGER.info(f"Obteniendo precios para hoy: {hoy} y mañana: {manana}")
 
@@ -83,9 +82,11 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
             else:
                 _LOGGER.warning("No se obtuvieron precios para hoy, los sensores no estarán disponibles")
             
+            # Los precios de mañana no siempre están publicados: cualquier
+            # fallo se ignora y se clasifica solo el día en curso.
             try:
                 precios_manana = await self.cliente_omie.obtener_precios_del_dia(manana)
-            except Exception:
+            except Exception:  # noqa: BLE001
                 precios_manana = None
 
             # Calcular precios efectivos y clasificaciones
@@ -135,7 +136,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
             _LOGGER.info(f"Datos actualizados correctamente. Fuente: {self._datos.fuente}, tramos: {len(self._datos.precios_hoy)}")
 
         except Exception as e:
-            _LOGGER.error(f"Error al actualizar datos: {e}", exc_info=True)
+            _LOGGER.exception("Error al actualizar datos")
             # Crear datos vacíos para evitar que los sensores fallen
             self._datos = DatosOmie(
                 precios_hoy=[],

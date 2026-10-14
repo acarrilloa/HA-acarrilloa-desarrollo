@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 import pytest
+
 from custom_components.optimizador_bateria_omie.tarifa import (
     ConfiguracionTarifa,
     ModeloTarifa,
@@ -188,17 +189,18 @@ class TestClasificarPorPercentiles:
             key=lambda x: ["valle", "llano", "punta"].index(x),
         )
 
-    def test_clasificar_por_percentiles_menos_de_96(
+    def test_clasificar_por_percentiles_menos_de_3(
         self, modelo_tarifa_por_defecto
     ):
-        """Test de clasificación con menos de 96 precios."""
-        precios = [0.10, 0.15, 0.20]
+        """Test de clasificación con menos de 3 precios (no clasificable)."""
+        precios = [0.10, 0.15]
 
         clasificaciones = modelo_tarifa_por_defecto.clasificar_por_percentiles(
             precios
         )
 
-        # Debería devolver lista de "valle"
+        # Con menos de 3 precios no se pueden calcular percentiles
+        # y se devuelve todo valle
         assert clasificaciones == ["valle"] * 96
 
 

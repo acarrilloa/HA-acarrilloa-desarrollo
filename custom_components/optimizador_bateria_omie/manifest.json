@@ -1,14 +1,14 @@
 {
   "domain": "optimizador_bateria_omie",
   "name": "Optimizador Batería OMIE",
-  "documentation": "https://github.com/acarr/optimizador-bateria-omie",
+  "documentation": "https://github.com/acarrilloa/optimizador-bateria-omie",
   "requirements": ["voluptuous>=0.15.0"],
   "dependencies": ["omie"],
-  "codeowners": ["@acarr"],
+  "codeowners": ["@acarrilloa"],
   "config_flow": true,
-  "version": "0.61",
+  "version": "0.62",
   "homeassistant": "2025.1.0",
-  "issue_tracker": "https://github.com/acarr/optimizador-bateria-omie/issues",
+  "issue_tracker": "https://github.com/acarrilloa/optimizador-bateria-omie/issues",
   "license": "MIT",
   "parallel_install": false
 }

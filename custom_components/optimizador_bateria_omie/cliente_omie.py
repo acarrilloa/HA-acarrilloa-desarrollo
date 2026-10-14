@@ -5,14 +5,6 @@ import logging
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-import aiohttp
-
-try:
-    import pytz
-    HAS_PYTZ = True
-except ImportError:
-    HAS_PYTZ = False
-
 from custom_components.optimizador_bateria_omie.const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,8 +33,9 @@ class Ranura:
         precio_eur_kwh: float,
         fuente: str,
         fecha_publicacion: datetime,
-        fecha_hora_fin_utc: datetime = None,
+        fecha_hora_fin_utc: datetime | None = None,
     ):
+        """Inicializa la ranura con su precio y ventana horaria en UTC."""
         self.fecha_hora_utc = fecha_hora_utc
         self.precio_eur_kwh = precio_eur_kwh
         self.fuente = fuente
@@ -63,13 +56,11 @@ class Ranura:
 class ErrorFuenteOmie(Exception):
     """Error al obtener datos de una fuente OMIE."""
 
-    pass
 
 
 class ErrorIntegracionNoDisponible(Exception):
     """Error cuando la integración OMIE no está disponible."""
 
-    pass
 
 
 class ClienteOmie:
@@ -80,16 +71,14 @@ class ClienteOmie:
         self.config = config
         # Usar custom_components/optimizador_bateria_omie/cache
         self._dir_cache = Path(hass.config.config_dir) / "custom_components" / DOMAIN / "cache"
-
-        # Asegurar que el directorio de cache existe
-        if self.config.usar_cache:
-            self._dir_cache.mkdir(parents=True, exist_ok=True)
+        # El directorio se crea bajo demanda dentro del executor
+        # (en _write_cache); mkdir() aquí bloquearía el event loop.
 
     async def _obtener_desde_integracion_omie(self, fecha: date) -> list:
         """Obtiene precios usando los sensores de la plantilla OMIE."""
         _LOGGER.info("Obteniendo precios de OMIE para fecha: %s", fecha)
 
-        hoy = date.today()
+        hoy = datetime.now(tz=timezone.utc).date()
         if fecha == hoy - timedelta(days=1):
             sensor_entity_id = "sensor.omie_precios_de_es_ayer"
         elif fecha == hoy:
@@ -126,34 +115,47 @@ class ClienteOmie:
         _LOGGER.info("Sensor %s sin datos de precios todavía", sensor_entity_id)
         return []
 
+    async def _obtener_session_aiohttp(self):
+        """Devuelve la sesión aiohttp compartida de Home Assistant.
+
+        Se usa la sesión gestionada por HA en lugar de crear una nueva
+        ``aiohttp.ClientSession`` por petición, que generaría fugas de
+        conexiones.
+        """
+        # Import diferido: mantiene el módulo importable sin Home Assistant
+        # (necesario para los tests unitarios del cliente).
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        return async_get_clientsession(self.hass)
+
     async def _obtener_desde_redata(self, fecha: date) -> list:
         """Obtiene precios desde REData (fallback)."""
         url = f"https://api.preciodelaluz.es/v1/prices?date={fecha.strftime('%Y-%m-%d')}"
-        
+
         _LOGGER.info(f"Obteniendo precios de REData para {fecha}")
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    raise ErrorFuenteOmie(f"REData devuelve status {response.status}")
-                data = await response.json()
-                _LOGGER.info(f"REData devolvió: tipo={type(data)}, keys={data.keys() if isinstance(data, dict) else 'N/A'}")
-                
-                # Manejar diferentes formatos de respuesta
-                if isinstance(data, dict):
-                    if "data" in data:
-                        datos = data["data"]
-                        _LOGGER.info(f"Datos de REData: {len(datos) if isinstance(datos, list) else type(datos)}")
-                        return datos
-                    elif isinstance(data, list):
-                        return data
-                    else:
-                        _LOGGER.error(f"Formato de REData inesperado: {data}")
-                        return []
+        session = await self._obtener_session_aiohttp()
+        async with session.get(url) as response:
+            if response.status != 200:
+                raise ErrorFuenteOmie(f"REData devuelve status {response.status}")
+            data = await response.json()
+            _LOGGER.info(f"REData devolvió: tipo={type(data)}, keys={data.keys() if isinstance(data, dict) else 'N/A'}")
+
+            # Manejar diferentes formatos de respuesta
+            if isinstance(data, dict):
+                if "data" in data:
+                    datos = data["data"]
+                    _LOGGER.info(f"Datos de REData: {len(datos) if isinstance(datos, list) else type(datos)}")
+                    return datos
                 elif isinstance(data, list):
                     return data
                 else:
-                    _LOGGER.error(f"Tipo de respuesta de REData inesperado: {type(data)}")
+                    _LOGGER.error(f"Formato de REData inesperado: {data}")
                     return []
+            elif isinstance(data, list):
+                return data
+            else:
+                _LOGGER.error(f"Tipo de respuesta de REData inesperado: {type(data)}")
+                return []
 
     async def _obtener_desde_esios(self, fecha: date) -> list:
         """Obtiene precios desde ESIOS (fallback alternativo)."""
@@ -223,7 +225,7 @@ class ClienteOmie:
                     tramo = hora * 4 + (minuto // 15)
                     datos_por_tramo[tramo] = precio
                     continue
-                except Exception as e:
+                except ValueError as e:
                     _LOGGER.warning(f"Error parseando start {start_str}: {e}")
             
             # Formato 1: lista de dicts con hour, minute, price
@@ -251,7 +253,8 @@ class ClienteOmie:
                         precio = item.get("price", 0.0)
                         tramo = hora * 4 + (minuto // 15)
                         datos_por_tramo[tramo] = precio
-                    except Exception:
+                    except ValueError:
+                        _LOGGER.debug("Descartando tramo con datetime no válido: %s", dt)
                         continue
                 elif isinstance(dt, datetime):
                     dt_obj = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
@@ -287,13 +290,14 @@ class ClienteOmie:
                             precio = parsed.get("price", 0.0)
                             tramo = hora * 4 + (minuto // 15)
                             datos_por_tramo[tramo] = precio
-                except Exception:
+                except (ValueError, TypeError):
+                    _LOGGER.debug("Descartando elemento JSON no válido en la lista de precios")
                     continue
-        
-        # Crear 96 tramos (24 horas * 4 tramos de 15 min)
+
+        # Crear 96 tramos (24 horas * 4 tramos de 15 min).
         # Si tenemos datos con start/end, usamos esos timestamps directamente
         if datos and isinstance(datos, list) and len(datos) > 0 and isinstance(datos[0], dict) and "start" in datos[0]:
-            _LOGGER.debug(f"Procesando formato OMIE con start/end")
+            _LOGGER.debug("Procesando formato OMIE con start/end")
             for item in datos:
                 start_str = item.get("start", "")
                 try:
@@ -314,7 +318,7 @@ class ClienteOmie:
                             end_dt = end_dt.replace(tzinfo=timezone.utc)
                         else:
                             end_dt = end_dt.astimezone(timezone.utc)
-                    except Exception:
+                    except ValueError:
                         end_dt = start_dt + timedelta(minutes=15)
                     
                     ranura = Ranura(
@@ -325,7 +329,7 @@ class ClienteOmie:
                         fecha_hora_fin_utc=end_dt,
                     )
                     ranuras.append(ranura)
-                except Exception as e:
+                except ValueError as e:
                     _LOGGER.warning(f"Error creando ranura desde {start_str}: {e}")
                     continue
             
@@ -388,6 +392,7 @@ class ClienteOmie:
 
         def _write_cache(ranuras: list):
             """Operación bloqueante: escribir cache."""
+            self._dir_cache.mkdir(parents=True, exist_ok=True)
             cache_file = self._dir_cache / f"{fecha.strftime('%Y-%m-%d')}.json"
             cache_data = [
                 {
@@ -417,7 +422,7 @@ class ClienteOmie:
                         )
                         for d in cached_data
                     ]
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 _LOGGER.warning(f"Error leyendo cache: {e}")
 
         # Obtener datos de la fuente prioritaria
@@ -434,37 +439,41 @@ class ClienteOmie:
                 except ErrorIntegracionNoDisponible as e:
                     _LOGGER.warning(f"Integración OMIE no disponible: {e}")
                     datos = None
-                except Exception as e:
+                # Excepcionalidad aceptada: cualquier fallo de la integración
+                # OMIE (fuente externa) debe caer al fallback, no romper el setup.
+                except Exception as e:  # noqa: BLE001
                     _LOGGER.warning(f"Error al obtener datos de OMIE: {e}")
                     _LOGGER.warning(f"Tipo de error: {type(e)}")
-                    
+
                     # Mensajes conocidos de error
                     if "have not been published yet" in str(e):
                         _LOGGER.warning("Los precios no están publicados aún, usando fallback REData")
-                        datos = None
-                    else:
-                        datos = None
+                    datos = None
             
             # Si no se obtuvieron datos de OMIE o OMIE no es la fuente prioritaria, usar fallback
-            if not datos    # None o lista vacía
+            if not datos:  # None o lista vacía
                 try:
                     datos = await self._obtener_desde_redata(fecha)
                     fuente = "redata"
                     _LOGGER.info(f"Datos obtenidos de REData: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                except Exception as e:
+                # Fallback: cualquier fallo de la fuente externa REData
+                # deja pasar a la siguiente fuente.
+                except Exception as e:  # noqa: BLE001
                     _LOGGER.warning(f"Error al obtener datos de REData: {e}")
                     datos = None
-                
+
                 if not datos:   # None o lista vacía
                     try:
                         datos = await self._obtener_desde_esios(fecha)
                         fuente = "esios"
                         _LOGGER.info(f"Datos obtenidos de ESIOS: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                    except Exception as e:
+                    # Fallback: cualquier fallo de la fuente externa ESIOS
+                    # se registra y termina la cascada de fuentes.
+                    except Exception as e:  # noqa: BLE001
                         _LOGGER.warning(f"Error al obtener datos de ESIOS: {e}")
                         datos = None
             
-            if datos is None:
+            if not datos:
                 raise ErrorFuenteOmie("Todas las fuentes fallaron")
         except ErrorFuenteOmie:
             raise ErrorFuenteOmie("Todas las fuentes fallaron")
@@ -482,7 +491,7 @@ class ClienteOmie:
         if self.config.usar_cache:
             try:
                 await self.hass.async_add_executor_job(_write_cache, ranuras)
-            except Exception as e:
+            except (OSError, ValueError) as e:
                 _LOGGER.warning(f"Error escribiendo cache: {e}")
 
         return ranuras

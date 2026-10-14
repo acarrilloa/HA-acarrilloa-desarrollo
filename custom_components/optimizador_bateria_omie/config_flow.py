@@ -8,10 +8,10 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 
 from custom_components.optimizador_bateria_omie.const import (
-    DOMAIN,
+    DEFAULT_DIAS_CACHE,
     DEFAULT_FUENTE_PRIORITARIA,
     DEFAULT_USAR_CACHE,
-    DEFAULT_DIAS_CACHE,
+    DOMAIN,
 )
 
 # Schema para la configuración
@@ -45,7 +45,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Validar entrada
             try:
                 validated_input = CONFIG_SCHEMA(user_input)
-            except vol.Invalid as err:
+            except vol.Invalid:
                 errors["base"] = "invalid_input"
 
             if not errors:

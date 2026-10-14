@@ -1,6 +1,6 @@
 """Modelo de tarifa eléctrica española 2.0TD."""
 
-from datetime import datetime, date, timezone
+from datetime import datetime, timezone
 
 from custom_components.optimizador_bateria_omie.const import FESTIVOS_ESPANA
 
@@ -24,67 +24,57 @@ class ConfiguracionTarifa:
 class PeriodoTarifa:
     """Define los horarios de los períodos tarifarios 2.0TD."""
 
-    # Horarios para días laborables (Lunes-Viernes)
-    # Punta: 10:00-14:00 y 18:00-22:00 (UTC+1 CET/CEST, guardado en UTC)
-    # Llano: 08:00-10:00 y 14:00-18:00 (UTC+1 CET/CEST, guardado en UTC)
-    # Valle: 00:00-08:00 y 22:00-24:00 (UTC+1 CET/CEST, guardado en UTC)
-    
-    # En UTC, asumiendo CET (UTC+1) o CEST (UTC+2)
-    # Para 2.0TD, usamos CET (UTC+1) como base
-    # Punta: 09:00-13:00 y 17:00-21:00 UTC
-    # Llano: 07:00-09:00 y 13:00-17:00 UTC
-    # Valle: 21:00-07:00 UTC (al día siguiente)
+    # Horarios para días laborables (Lunes-Viernes), franjas locales CET (UTC+1)
+    # convertidas a UTC (SPEC.md §5.6):
+    # Punta local: 10:00-14:00 y 18:00-22:00 → 09:00-13:00 y 17:00-21:00 UTC
+    # Llano local: 08:00-10:00, 14:00-18:00 y 22:00-24:00 → 07:00-09:00,
+    #   13:00-17:00 y 21:00-23:00 UTC
+    # Valle local: 00:00-08:00 → 23:00-07:00 UTC (a caballo del día)
+    # Sábados, domingos y festivos: valle todo el día
     
     @classmethod
     def es_punta(cls, fecha_hora_utc: datetime) -> bool:
         """Verifica si la hora está en período punta."""
         hour = fecha_hora_utc.hour
-        minute = fecha_hora_utc.minute
-        
-        #ta Punta: 09:00-13:00 y 17:00-21:00 UTC
-        return (
-            (hour >= 9 and hour < 13) or
-            (hour >= 17 and hour < 21)
-        )
+
+        # Punta: 09:00-13:00 y 17:00-21:00 UTC
+        return (hour >= 9 and hour < 13) or (hour >= 17 and hour < 21)
     
     @classmethod
     def es_llano(cls, fecha_hora_utc: datetime) -> bool:
         """Verifica si la hora está en período llano."""
         hour = fecha_hora_utc.hour
-        minute = fecha_hora_utc.minute
-        
-        # Llano: 07:00-09:00 y 13:00-17:00 UTC
+
+        # Llano: 07:00-09:00, 13:00-17:00 y 21:00-23:00 UTC
+        # (local CET: 08:00-10:00, 14:00-18:00 y 22:00-24:00, SPEC.md §5.6)
         return (
-            (hour >= 7 and hour < 9) or
-            (hour >= 13 and hour < 17)
+            (hour >= 7 and hour < 9)
+            or (hour >= 13 and hour < 17)
+            or (hour >= 21 and hour < 23)
         )
-    
+
     @classmethod
     def es_valle(cls, fecha_hora_utc: datetime) -> bool:
         """Verifica si la hora está en período valle."""
         hour = fecha_hora_utc.hour
-        minute = fecha_hora_utc.minute
-        
-        # Valle: 21:00-07:00 UTC (al día siguiente)
-        return hour >= 21 or hour < 7
+
+        # Valle: 23:00-07:00 UTC (local CET: 00:00-08:00)
+        return hour >= 23 or hour < 7
 
 
 class ModeloTarifa:
     """Modelo de tarifa eléctrica 2.0TD con peajes y cargos."""
 
     # Peajes de acceso a la red (2.0TD) - €/kWh
-    # Fuente: BOE-A-2023-13048
+    # Fuente: SPEC.md §5.6 (BOE)
     PEAJE_ACCESO_PUNTA = 0.033261  # €/kWh
-    PEAJE_ACCESO_LLANO = 0.008587  # €/kWh
+    PEAJE_ACCESO_LLANO = 0.016409  # €/kWh
     PEAJE_ACCESO_VALLE = 0.000077  # €/kWh
-    
+
     # Cargos del sistema (2.0TD) - €/kWh
     CARGO_SISTEMA_PUNTA = 0.064292  # €/kWh
-    CARGO_SISTEMA_LLANO = 0.003215  # €/kWh
+    CARGO_SISTEMA_LLANO = 0.012858  # €/kWh
     CARGO_SISTEMA_VALLE = 0.003215  # €/kWh
-    
-    # Pérdidas de energía (estimación) - €/kWh
-    PERDIDAS_ENERGIA = 0.011
 
     def __init__(self, config: ConfiguracionTarifa | None = None):
         self.config = config or ConfiguracionTarifa()
@@ -106,13 +96,13 @@ class ModeloTarifa:
             return "valle"
 
     def obtener_peaje_cargo(self, periodo: str) -> float:
-        """Obtiene el peaje + cargo para un período dado."""
+        """Obtiene el peaje + cargo para un período dado (SPEC.md §5.6)."""
         if periodo == "punta":
-            return self.PEAJE_ACCESO_PUNTA + self.CARGO_SISTEMA_PUNTA + self.PERDIDAS_ENERGIA
+            return self.PEAJE_ACCESO_PUNTA + self.CARGO_SISTEMA_PUNTA
         elif periodo == "llano":
-            return self.PEAJE_ACCESO_LLANO + self.CARGO_SISTEMA_LLANO + self.PERDIDAS_ENERGIA
+            return self.PEAJE_ACCESO_LLANO + self.CARGO_SISTEMA_LLANO
         else:  # valle
-            return self.PEAJE_ACCESO_VALLE + self.CARGO_SISTEMA_VALLE + self.PERDIDAS_ENERGIA
+            return self.PEAJE_ACCESO_VALLE + self.CARGO_SISTEMA_VALLE
 
     def obtener_precio_efectivo(self, precio_spot: float, fecha_hora_utc: datetime) -> float:
         """Calcula el precio efectivo incluyendo peajes, cargos e impuestos."""
@@ -185,8 +175,8 @@ class ModeloTarifa:
 
     def es_festivo(self, fecha: datetime) -> bool:
         """Verifica si una fecha es festivo nacional."""
-        dia_mes = (fecha.day, fecha.month)
-        return dia_mes in FESTIVOS_ESPANA
+        mes_dia = (fecha.month, fecha.day)
+        return mes_dia in FESTIVOS_ESPANA
 
     def es_fin_de_semana(self, fecha: datetime) -> bool:
         """Verifica si una fecha es fin de semana (sábado o domingo)."""

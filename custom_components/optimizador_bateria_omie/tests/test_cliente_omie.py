@@ -1,6 +1,6 @@
 """Tests para ClienteOmie."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,7 +23,7 @@ async def test_obtener_precios_del_dia_integracion(
     cliente_omie, fixture_respuesta_integracion_omie
 ):
     """Test de obtener precios usando la integración OMIE."""
-    hoy = datetime.now(tz=timezone.utc).date()
+    hoy = datetime.now(tz=UTC).date()
     cliente_omie.hass.config.components = ["omie"]
     cliente_omie.hass.states.get = MagicMock(
         return_value=_estado_con_precios(fixture_respuesta_integracion_omie)
@@ -54,7 +54,7 @@ async def test_obtener_precios_del_dia_fallback_redata(
     with patch.object(
         cliente_omie, "_obtener_session_aiohttp", new=AsyncMock(return_value=mock_session)
     ):
-        hoy = datetime.now(tz=timezone.utc).date()
+        hoy = datetime.now(tz=UTC).date()
         ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
 
     # Verificar que se usó REData
@@ -77,7 +77,7 @@ async def test_obtener_precios_del_dia_cache(
     cliente_omie.hass.config.components = ["omie"]
     cliente_omie.hass.states.get = MagicMock(side_effect=mock_states_get)
 
-    hoy = datetime.now(tz=timezone.utc).date()
+    hoy = datetime.now(tz=UTC).date()
 
     # Primera llamada - debe consultar el sensor OMIE
     ranuras1 = await cliente_omie.obtener_precios_del_dia(hoy)
@@ -101,7 +101,7 @@ async def test_normalizar_a_15min_horario(
         return_value=_estado_con_precios(fixture_respuesta_integracion_omie_horario)
     )
 
-    hoy = datetime.now(tz=timezone.utc).date()
+    hoy = datetime.now(tz=UTC).date()
     ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
 
     # Verificar que se normalizó a 96 tramos
@@ -113,7 +113,7 @@ async def test_todas_las_fuentes_fallan(cliente_omie):
     """Test de error cuando todas las fuentes fallan."""
     cliente_omie.hass.config.components = []  # No tiene integración OMIE
 
-    hoy = datetime.now(tz=timezone.utc).date()
+    hoy = datetime.now(tz=UTC).date()
 
     # REData falla (error de red) y ESIOS es un placeholder vacío
     with patch.object(

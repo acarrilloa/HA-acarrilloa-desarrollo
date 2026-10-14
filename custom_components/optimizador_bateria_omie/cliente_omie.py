@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from custom_components.optimizador_bateria_omie.const import DOMAIN
@@ -78,7 +78,7 @@ class ClienteOmie:
         """Obtiene precios usando los sensores de la plantilla OMIE."""
         _LOGGER.info("Obteniendo precios de OMIE para fecha: %s", fecha)
 
-        hoy = datetime.now(tz=timezone.utc).date()
+        hoy = datetime.now(tz=UTC).date()
         if fecha == hoy - timedelta(days=1):
             sensor_entity_id = "sensor.omie_precios_de_es_ayer"
         elif fecha == hoy:
@@ -215,9 +215,9 @@ class ClienteOmie:
                     start_dt = datetime.fromisoformat(start_str)
                     # Convertir a UTC
                     if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=timezone.utc)
+                        start_dt = start_dt.replace(tzinfo=UTC)
                     else:
-                        start_dt = start_dt.astimezone(timezone.utc)
+                        start_dt = start_dt.astimezone(UTC)
                     
                     hora = start_dt.hour
                     minuto = start_dt.minute
@@ -243,11 +243,11 @@ class ClienteOmie:
                 if isinstance(dt, str):
                     # Parsear datetime string
                     try:
-                        dt_obj = datetime.fromisoformat(dt.replace('Z', '+00:00'))
+                        dt_obj = datetime.fromisoformat(dt)
                         if dt_obj.tzinfo is None:
-                            dt_obj = dt_obj.replace(tzinfo=timezone.utc)
+                            dt_obj = dt_obj.replace(tzinfo=UTC)
                         else:
-                            dt_obj = dt_obj.astimezone(timezone.utc)
+                            dt_obj = dt_obj.astimezone(UTC)
                         hora = dt_obj.hour
                         minuto = dt_obj.minute
                         precio = item.get("price", 0.0)
@@ -257,7 +257,7 @@ class ClienteOmie:
                         _LOGGER.debug("Descartando tramo con datetime no válido: %s", dt)
                         continue
                 elif isinstance(dt, datetime):
-                    dt_obj = dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                    dt_obj = dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
                     hora = dt_obj.hour
                     minuto = dt_obj.minute
                     precio = item.get("price", 0.0)
@@ -276,9 +276,9 @@ class ClienteOmie:
                             start_str = parsed.get("start", "")
                             start_dt = datetime.fromisoformat(start_str)
                             if start_dt.tzinfo is None:
-                                start_dt = start_dt.replace(tzinfo=timezone.utc)
+                                start_dt = start_dt.replace(tzinfo=UTC)
                             else:
-                                start_dt = start_dt.astimezone(timezone.utc)
+                                start_dt = start_dt.astimezone(UTC)
                             hora = start_dt.hour
                             minuto = start_dt.minute
                             precio = float(parsed.get("price", 0.0))
@@ -303,9 +303,9 @@ class ClienteOmie:
                 try:
                     start_dt = datetime.fromisoformat(start_str)
                     if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=timezone.utc)
+                        start_dt = start_dt.replace(tzinfo=UTC)
                     else:
-                        start_dt = start_dt.astimezone(timezone.utc)
+                        start_dt = start_dt.astimezone(UTC)
                     
                     precio = float(item.get("price", 0.0))
                     _LOGGER.debug(f"Creando ranura: {start_dt.isoformat()} - {precio}")
@@ -315,9 +315,9 @@ class ClienteOmie:
                     try:
                         end_dt = datetime.fromisoformat(end_str)
                         if end_dt.tzinfo is None:
-                            end_dt = end_dt.replace(tzinfo=timezone.utc)
+                            end_dt = end_dt.replace(tzinfo=UTC)
                         else:
-                            end_dt = end_dt.astimezone(timezone.utc)
+                            end_dt = end_dt.astimezone(UTC)
                     except ValueError:
                         end_dt = start_dt + timedelta(minutes=15)
                     
@@ -325,7 +325,7 @@ class ClienteOmie:
                         fecha_hora_utc=start_dt,
                         precio_eur_kwh=precio,
                         fuente="omie",
-                        fecha_publicacion=datetime.now(tz=timezone.utc),
+                        fecha_publicacion=datetime.now(tz=UTC),
                         fecha_hora_fin_utc=end_dt,
                     )
                     ranuras.append(ranura)
@@ -342,13 +342,13 @@ class ClienteOmie:
                     hora = tramo // 4
                     minuto = (tramo % 4) * 15
                     fecha_hora_utc = datetime(
-                        base_date.year, base_date.month, base_date.day, hora, minuto, tzinfo=timezone.utc
+                        base_date.year, base_date.month, base_date.day, hora, minuto, tzinfo=UTC
                     )
                     ranura = Ranura(
                         fecha_hora_utc=fecha_hora_utc,
                         precio_eur_kwh=0.0,
                         fuente="omie",
-                        fecha_publicacion=datetime.now(tz=timezone.utc),
+                        fecha_publicacion=datetime.now(tz=UTC),
                         fecha_hora_fin_utc=fecha_hora_utc + timedelta(minutes=15),
                     )
                     ranuras.append(ranura)
@@ -366,14 +366,14 @@ class ClienteOmie:
                     precio = 0.0
                 
                 fecha_hora_utc = datetime(
-                    fecha.year, fecha.month, fecha.day, hora, minuto, tzinfo=timezone.utc
+                    fecha.year, fecha.month, fecha.day, hora, minuto, tzinfo=UTC
                 )
                 
                 ranura = Ranura(
                     fecha_hora_utc=fecha_hora_utc,
                     precio_eur_kwh=float(precio),
                     fuente="omie",
-                    fecha_publicacion=datetime.now(tz=timezone.utc),
+                    fecha_publicacion=datetime.now(tz=UTC),
                     fecha_hora_fin_utc=fecha_hora_utc + timedelta(minutes=15),
                 )
                 ranuras.append(ranura)

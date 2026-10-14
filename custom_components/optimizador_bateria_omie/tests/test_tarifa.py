@@ -1,6 +1,6 @@
 """Tests para ModeloTarifa."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -36,7 +36,7 @@ class TestObtenerPeriodo:
     ):
         """Test de período punta en horario de mañana (10:00-14:00)."""
         # 12:00 en UTC, asumiendo CET (UTC+1) = 13:00 local -> punta
-        fecha_hora_utc = datetime(2025, 1, 15, 12, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 15, 12, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "punta"
 
@@ -45,7 +45,7 @@ class TestObtenerPeriodo:
     ):
         """Test de período punta en horario de tarde (18:00-22:00)."""
         # 19:00 en UTC, asumiendo CET (UTC+1) = 20:00 local -> punta
-        fecha_hora_utc = datetime(2025, 1, 15, 19, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 15, 19, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "punta"
 
@@ -54,7 +54,7 @@ class TestObtenerPeriodo:
     ):
         """Test de período llano en horario de mañana (08:00-10:00)."""
         # 8:00 en UTC, asumiendo CET (UTC+1) = 09:00 local -> llano
-        fecha_hora_utc = datetime(2025, 1, 15, 7, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 15, 7, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "llano"
 
@@ -63,7 +63,7 @@ class TestObtenerPeriodo:
     ):
         """Test de período llano en horario de tarde (14:00-18:00)."""
         # 15:00 en UTC, asumiendo CET (UTC+1) = 16:00 local -> llano
-        fecha_hora_utc = datetime(2025, 1, 15, 14, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 15, 14, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "llano"
 
@@ -72,34 +72,34 @@ class TestObtenerPeriodo:
     ):
         """Test de período valle en horario nocturno (00:00-08:00)."""
         # 5:00 en UTC, asumiendo CET (UTC+1) = 06:00 local -> valle
-        fecha_hora_utc = datetime(2025, 1, 15, 5, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 15, 5, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "valle"
 
     def test_obtener_periodo_sabado(self, modelo_tarifa_por_defecto):
         """Test de período en sábado -> valle todo el día."""
         # Sábado 12:00 UTC = sábado 13:00 local -> valle
-        fecha_hora_utc = datetime(2025, 1, 18, 12, 0, tzinfo=timezone.utc)  # 18 de enero 2025 es sábado
+        fecha_hora_utc = datetime(2025, 1, 18, 12, 0, tzinfo=UTC)  # 18 de enero 2025 es sábado
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "valle"
 
     def test_obtener_periodo_domingo(self, modelo_tarifa_por_defecto):
         """Test de período en domingo -> valle todo el día."""
         # Domingo 12:00 UTC = domingo 13:00 local -> valle
-        fecha_hora_utc = datetime(2025, 1, 19, 12, 0, tzinfo=timezone.utc)  # 19 de enero 2025 es domingo
+        fecha_hora_utc = datetime(2025, 1, 19, 12, 0, tzinfo=UTC)  # 19 de enero 2025 es domingo
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "valle"
 
     def test_obtener_periodo_festivo(self, modelo_tarifa_por_defecto):
         """Test de período en festivo nacional -> valle todo el día."""
         # 1 de enero (Año Nuevo) a cualquier hora -> valle
-        fecha_hora_utc = datetime(2025, 1, 1, 12, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 1, 12, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "valle"
 
     def test_obtener_periodo_festivo_6_enero(self, modelo_tarifa_por_defecto):
         """Test de período en 6 de enero (Reyes) -> valle."""
-        fecha_hora_utc = datetime(2025, 1, 6, 12, 0, tzinfo=timezone.utc)
+        fecha_hora_utc = datetime(2025, 1, 6, 12, 0, tzinfo=UTC)
         periodo = modelo_tarifa_por_defecto.obtener_periodo(fecha_hora_utc)
         assert periodo == "valle"
 
@@ -111,7 +111,7 @@ class TestObtenerPrecioEfectivo:
         self, modelo_tarifa_por_defecto
     ):
         """Test de cálculo de precio efectivo en período punta."""
-        fecha_hora_utc = datetime(2025, 1, 15, 12, 0, tzinfo=timezone.utc)  # punta
+        fecha_hora_utc = datetime(2025, 1, 15, 12, 0, tzinfo=UTC)  # punta
         precio_spot = 0.15  # €/kWh
 
         precio_efectivo = modelo_tarifa_por_defecto.obtener_precio_efectivo(
@@ -131,7 +131,7 @@ class TestObtenerPrecioEfectivo:
         self, modelo_tarifa_por_defecto
     ):
         """Test de cálculo de precio efectivo en período valle."""
-        fecha_hora_utc = datetime(2025, 1, 15, 5, 0, tzinfo=timezone.utc)  # valle
+        fecha_hora_utc = datetime(2025, 1, 15, 5, 0, tzinfo=UTC)  # valle
         precio_spot = 0.05  # €/kWh
 
         precio_efectivo = modelo_tarifa_por_defecto.obtener_precio_efectivo(
@@ -150,7 +150,7 @@ class TestObtenerPrecioEfectivo:
         self, modelo_tarifa_sin_impuestos
     ):
         """Test de cálculo sin impuestos."""
-        fecha_hora_utc = datetime(2025, 1, 15, 12, 0, tzinfo=timezone.utc)  # punta
+        fecha_hora_utc = datetime(2025, 1, 15, 12, 0, tzinfo=UTC)  # punta
         precio_spot = 0.15
 
         precio_efectivo = modelo_tarifa_sin_impuestos.obtener_precio_efectivo(
@@ -236,29 +236,29 @@ class TestFestivos:
     def test_es_festivo_ano_nuevo(self, modelo_tarifa_por_defecto):
         """Test de festivo: Año Nuevo."""
         assert modelo_tarifa_por_defecto.es_festivo(
-            datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc)
+            datetime(2025, 1, 1, 0, 0, tzinfo=UTC)
         )
 
     def test_es_festivo_no_festivo(self, modelo_tarifa_por_defecto):
         """Test de no festivo: día normal."""
         assert not modelo_tarifa_por_defecto.es_festivo(
-            datetime(2025, 1, 15, 0, 0, tzinfo=timezone.utc)
+            datetime(2025, 1, 15, 0, 0, tzinfo=UTC)
         )
 
     def test_es_fin_de_semana_sabado(self, modelo_tarifa_por_defecto):
         """Test de fin de semana: sábado."""
         assert modelo_tarifa_por_defecto.es_fin_de_semana(
-            datetime(2025, 1, 18, 0, 0, tzinfo=timezone.utc)  # Sábado
+            datetime(2025, 1, 18, 0, 0, tzinfo=UTC)  # Sábado
         )
 
     def test_es_fin_de_semana_domingo(self, modelo_tarifa_por_defecto):
         """Test de fin de semana: domingo."""
         assert modelo_tarifa_por_defecto.es_fin_de_semana(
-            datetime(2025, 1, 19, 0, 0, tzinfo=timezone.utc)  # Domingo
+            datetime(2025, 1, 19, 0, 0, tzinfo=UTC)  # Domingo
         )
 
     def test_es_fin_de_semana_lunes(self, modelo_tarifa_por_defecto):
         """Test de no fin de semana: lunes."""
         assert not modelo_tarifa_por_defecto.es_fin_de_semana(
-            datetime(2025, 1, 20, 0, 0, tzinfo=timezone.utc)  # Lunes
+            datetime(2025, 1, 20, 0, 0, tzinfo=UTC)  # Lunes
         )

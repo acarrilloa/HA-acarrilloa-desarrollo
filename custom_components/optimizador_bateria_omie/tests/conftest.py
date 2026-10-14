@@ -1,6 +1,6 @@
 """Fixtures para tests del componente optimizador_bateria_omie."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -40,7 +40,7 @@ def cliente_omie(tmp_path):
 @pytest.fixture
 def fixture_respuesta_integracion_omie():
     """Fixture para respuesta de la integración OMIE (96 tramos normales)."""
-    hoy = datetime.now(tz=timezone.utc).date()
+    hoy = datetime.now(tz=UTC).date()
     respuesta = []
     for h in range(24):
         for m in [0, 15, 30, 45]:
@@ -58,7 +58,7 @@ def fixture_respuesta_integracion_omie():
 @pytest.fixture
 def fixture_respuesta_redata():
     """Fixture para respuesta de REData API."""
-    hoy = datetime.now(tz=timezone.utc).date()
+    hoy = datetime.now(tz=UTC).date()
     return {
         "data": [
             {

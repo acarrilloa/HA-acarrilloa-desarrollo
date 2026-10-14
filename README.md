@@ -25,8 +25,8 @@
 
 ## Requisitos
 
-- **Home Assistant**: 2025.1.0 o superior
-- **Python**: 3.13 o superior
+- **Home Assistant**: 2026.10.1 o superior
+- **Python**: 3.14 o superior
 - **IntegraciÃ³n OMIE**: Recomendada (pero no obligatoria, hay fallback a REData)
 
 ## InstalaciÃ³n
@@ -238,7 +238,7 @@ ruff check custom_components/optimizador_bateria_omie/
 
 ## Licencia
 
-MIT License - Copyright (c) 2025
+MIT License - Copyright (c) 2026
 
 ## Agradecimientos
 

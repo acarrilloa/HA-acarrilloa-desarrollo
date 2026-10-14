@@ -1,6 +1,6 @@
 """Tests para entidades (sensores)."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,11 +27,13 @@ def mock_coordinador():
     cliente_omie = MagicMock()
     modelo_tarifa = MagicMock()
 
-    coordinador = CoordinadorDatosOmie(hass, cliente_omie, modelo_tarifa)
+    coordinador = CoordinadorDatosOmie(
+        hass, cliente_omie, modelo_tarifa, MagicMock()
+    )
 
     # Crear datos mock
-    hoy = datetime.now(tz=timezone.utc).date()
-    tz_utc = timezone.utc
+    hoy = datetime.now(tz=UTC).date()
+    tz_utc = UTC
     ranuras_hoy = [
         Ranura(
             fecha_hora_utc=datetime(hoy.year, hoy.month, hoy.day, h, m, tzinfo=tz_utc),
@@ -105,7 +107,6 @@ class TestSensorPrecioActual:
         sensor_precio_actual.coordinator.obtener_precio_actual = MagicMock(
             return_value=0.15
         )
-        sensor_precio_actual.async_update()
 
         assert sensor_precio_actual.native_value == 0.15
         assert sensor_precio_actual.available is True
@@ -115,7 +116,6 @@ class TestSensorPrecioActual:
         sensor_precio_actual.coordinator.obtener_precio_actual = MagicMock(
             return_value=None
         )
-        sensor_precio_actual.async_update()
 
         assert sensor_precio_actual.native_value == STATE_UNAVAILABLE
         assert sensor_precio_actual.available is False
@@ -139,13 +139,12 @@ class TestSensorPrecioEfectivo:
         )
         sensor_precio_efectivo.coordinator.obtener_ranura_actual = MagicMock(
             return_value=Ranura(
-                datetime.now(tz=timezone.utc),
+                datetime.now(tz=UTC),
                 0.15,
                 "omie",
-                datetime.now(tz=timezone.utc),
+                datetime.now(tz=UTC),
             )
         )
-        sensor_precio_efectivo.async_update()
 
         assert sensor_precio_efectivo.native_value == 0.20
         assert sensor_precio_efectivo.available is True
@@ -170,7 +169,6 @@ class TestSensorPrecioClasificacion:
         sensor_precio_clasificacion.coordinator.obtener_clasificacion_actual = (
             MagicMock(return_value="punta")
         )
-        sensor_precio_clasificacion.async_update()
 
         assert sensor_precio_clasificacion.native_value == "punta"
         assert sensor_precio_clasificacion.available is True
@@ -194,7 +192,6 @@ class TestSensorPrecioEstadisticas:
         sensor_precio_estadisticas.coordinator.obtener_estadisticas_actual = (
             MagicMock(return_value={"min": 0.10, "max": 0.30, "mediana": 0.20})
         )
-        sensor_precio_estadisticas.async_update()
 
         assert sensor_precio_estadisticas.native_value == 0.20
         assert sensor_precio_estadisticas.available is True

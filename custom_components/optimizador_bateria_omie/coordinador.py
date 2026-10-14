@@ -2,8 +2,9 @@
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -40,6 +41,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         hass,
         cliente_omie: ClienteOmie,
         modelo_tarifa: ModeloTarifa,
+        config_entry: ConfigEntry | None = None,
     ):
         """Inicializa el coordinador."""
         super().__init__(
@@ -47,6 +49,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
             _LOGGER,
             name="Optimizador Batería OMIE",
             update_interval=timedelta(minutes=15),
+            config_entry=config_entry,
         )
         self.cliente_omie = cliente_omie
         self.modelo_tarifa = modelo_tarifa
@@ -61,7 +64,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
             estadisticas_hoy={"min": 0, "max": 0, "mediana": 0},
             estadisticas_manana=None,
             fuente="inicializando",
-            ts_actualizacion=datetime.now(tz=timezone.utc),
+            ts_actualizacion=datetime.now(tz=UTC),
         )
 
     async def _async_update_data(self):
@@ -69,7 +72,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         _LOGGER.info("Actualizando datos de precios OMIE...")
         try:
             # Obtener precios de hoy y mañana
-            hoy = datetime.now(tz=timezone.utc).date()
+            hoy = datetime.now(tz=UTC).date()
             manana = hoy + timedelta(days=1)
             _LOGGER.info(f"Obteniendo precios para hoy: {hoy} y mañana: {manana}")
 
@@ -131,7 +134,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
                 estadisticas_hoy=estadisticas_hoy,
                 estadisticas_manana=estadisticas_manana,
                 fuente=precios_hoy[0].fuente if precios_hoy else "desconocida",
-                ts_actualizacion=datetime.now(tz=timezone.utc),
+                ts_actualizacion=datetime.now(tz=UTC),
             )
             _LOGGER.info(f"Datos actualizados correctamente. Fuente: {self._datos.fuente}, tramos: {len(self._datos.precios_hoy)}")
 
@@ -146,9 +149,14 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
                 estadisticas_hoy={"min": 0, "max": 0, "mediana": 0},
                 estadisticas_manana=None,
                 fuente="desconocida",
-                ts_actualizacion=datetime.now(tz=timezone.utc),
+                ts_actualizacion=datetime.now(tz=UTC),
             )
             raise UpdateFailed(f"Error al actualizar datos: {e}")
+
+    @property
+    def datos(self) -> DatosOmie | None:
+        """Devuelve los datos actuales del coordinador."""
+        return self._datos
 
     def obtener_precio_actual(self) -> float | None:
         """Obtiene el precio actual."""
@@ -156,7 +164,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
             _LOGGER.debug("No hay datos de precios hoy")
             return None
 
-        ahora = datetime.now(tz=timezone.utc)
+        ahora = datetime.now(tz=UTC)
         _LOGGER.debug(f"Buscando precio actual para hora UTC: {ahora.isoformat()}")
         
         if not self._datos.precios_hoy:
@@ -187,7 +195,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         if precio_actual is None:
             return None
 
-        ahora = datetime.now(tz=timezone.utc)
+        ahora = datetime.now(tz=UTC)
         return self.modelo_tarifa.obtener_precio_efectivo(precio_actual, ahora)
 
     def obtener_ranura_actual(self) -> Ranura | None:
@@ -195,7 +203,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         if not self._datos or not self._datos.precios_hoy:
             return None
 
-        ahora = datetime.now(tz=timezone.utc)
+        ahora = datetime.now(tz=UTC)
         for ranura in self._datos.precios_hoy:
             fin_ranura = ranura.fecha_hora_fin_utc if ranura.fecha_hora_fin_utc else ranura.fecha_hora_utc + timedelta(minutes=15)
             if ranura.fecha_hora_utc <= ahora < fin_ranura:
@@ -208,7 +216,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         if not self._datos or not self._datos.clasificaciones_hoy:
             return None
 
-        ahora = datetime.now(tz=timezone.utc)
+        ahora = datetime.now(tz=UTC)
         # La clasificación está en la misma posición que el tramo horario
         minuto_actual = ahora.hour * 60 + ahora.minute
         tramo = minuto_actual // 15

@@ -34,7 +34,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         
         modelo_tarifa = ModeloTarifa()
         cliente_omie = ClienteOmie(hass, config_omie)
-        coordinador = CoordinadorDatosOmie(hass, cliente_omie, modelo_tarifa)
+        coordinador = CoordinadorDatosOmie(hass, cliente_omie, modelo_tarifa, entry)
         
         # Iniciar actualización del coordinador (no bloquear si falla)
         # El primer refresh no debe romper el setup: los sensores se

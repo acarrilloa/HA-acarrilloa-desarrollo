@@ -1,6 +1,6 @@
 """Modelo de tarifa eléctrica española 2.0TD."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from custom_components.optimizador_bateria_omie.const import FESTIVOS_ESPANA
 
@@ -81,7 +81,7 @@ class ModeloTarifa:
 
     def obtener_periodo(self, fecha_hora_utc: datetime) -> str:
         """Determina el período tarifario (punta, llano, valle)."""
-        fecha_local = fecha_hora_utc.astimezone(timezone.utc)  # Ya está en UTC
+        fecha_local = fecha_hora_utc.astimezone(UTC)  # Ya está en UTC
         
         # Verificar si es festivo o fin de semana
         if self.es_festivo(fecha_local) or self.es_fin_de_semana(fecha_local):

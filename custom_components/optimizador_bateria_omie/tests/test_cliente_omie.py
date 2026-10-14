@@ -1,6 +1,7 @@
 """Tests para ClienteOmie."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -60,6 +61,81 @@ async def test_obtener_precios_del_dia_fallback_redata(
     # Verificar que se usó REData
     assert len(ranuras) == 96
     assert ranuras[0].fuente == "redata"
+
+
+@pytest.mark.asyncio
+async def test_precios_formato_start_price(
+    cliente_omie, fixture_respuesta_formato_start_price
+):
+    """Test del formato real del sensor OMIE: start/price con offset +02:00."""
+    from datetime import datetime
+
+    hoy = datetime.now(tz=UTC).date()
+    cliente_omie.hass.config.components = ["omie"]
+    cliente_omie.hass.states.get = MagicMock(
+        return_value=_estado_con_precios(fixture_respuesta_formato_start_price)
+    )
+
+    ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
+
+    assert len(ranuras) == 96
+    # El primer tramo local 00:00 (+02:00) son las 22:00 UTC del día anterior
+    assert ranuras[0].fecha_hora_utc == datetime(
+        hoy.year, hoy.month, hoy.day, tzinfo=UTC
+    ) - timedelta(hours=2)
+    assert ranuras[0].precio_eur_kwh == pytest.approx(0.10)
+    # Tramos consecutivos de 15 minutos
+    for actual, siguiente in pairwise(ranuras):
+        assert siguiente.fecha_hora_utc - actual.fecha_hora_utc == timedelta(minutes=15)
+    # Todos con fuente omie
+    assert all(r.fuente == "omie" for r in ranuras)
+
+
+@pytest.mark.asyncio
+async def test_relleno_tramos_incompletos(
+    cliente_omie, fixture_respuesta_formato_start_price
+):
+    """Test: si llegan menos de 96 tramos, el relleno continúa la línea
+    temporal desde la última ranura conocida (no reinicia fechas)."""
+    from datetime import datetime
+
+    hoy = datetime.now(tz=UTC).date()
+    parcial = fixture_respuesta_formato_start_price[:48]
+    cliente_omie.hass.config.components = ["omie"]
+    cliente_omie.hass.states.get = MagicMock(
+        return_value=_estado_con_precios(parcial)
+    )
+
+    ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
+
+    assert len(ranuras) == 96
+    for actual, siguiente in pairwise(ranuras):
+        assert siguiente.fecha_hora_utc - actual.fecha_hora_utc == timedelta(minutes=15)
+    # Los tramos rellenados están a 0.0
+    assert all(r.precio_eur_kwh == 0.0 for r in ranuras[48:])
+    assert all(r.precio_eur_kwh > 0.0 for r in ranuras[:48])
+
+
+@pytest.mark.asyncio
+async def test_atributo_precios_texto_yaml(
+    cliente_omie, fixture_respuesta_texto_yaml
+):
+    """Test del atributo 'precios' como texto YAML (render del panel de estados)."""
+    from datetime import datetime
+
+    hoy = datetime.now(tz=UTC).date()
+    cliente_omie.hass.config.components = ["omie"]
+    state = MagicMock()
+    state.state = "on"
+    state.attributes = {"precios": fixture_respuesta_texto_yaml}
+    cliente_omie.hass.states.get = MagicMock(return_value=state)
+
+    ranuras = await cliente_omie.obtener_precios_del_dia(hoy)
+
+    assert len(ranuras) == 96
+    assert ranuras[0].precio_eur_kwh == pytest.approx(0.10)
+    assert ranuras[-1].fecha_hora_utc.hour == 21  # 23:45 local (+02:00) → 21:45 UTC
+    assert ranuras[-1].fecha_hora_fin_utc.minute == 0  # fin 22:00 UTC
 
 
 @pytest.mark.asyncio

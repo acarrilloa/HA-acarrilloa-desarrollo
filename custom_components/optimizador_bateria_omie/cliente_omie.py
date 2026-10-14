@@ -104,6 +104,16 @@ class ClienteOmie:
                     sensor_entity_id, attr_name, len(datos), datos[0],
                 )
                 return datos
+            # Algunas versiones de la integración OMIE exponen los precios
+            # como texto (JSON o YAML) en lugar de una lista.
+            if isinstance(datos, str) and datos.strip():
+                datos_parseados = self._parse_texto_precios(datos)
+                if datos_parseados:
+                    _LOGGER.info(
+                        "Datos parseados de %s.%s → %d intervalos",
+                        sensor_entity_id, attr_name, len(datos_parseados),
+                    )
+                    return datos_parseados
             if attr_name in state.attributes:
                 _LOGGER.debug(
                     "Atributo %s.%s presente pero vacío (%s)",
@@ -114,6 +124,30 @@ class ClienteOmie:
         # (obtener_precios_del_dia) intente REData / ESIOS como fallback.
         _LOGGER.info("Sensor %s sin datos de precios todavía", sensor_entity_id)
         return []
+
+    def _parse_texto_precios(self, texto: str) -> list | None:
+        """Parsea un atributo de precios en texto (JSON o YAML)."""
+        try:
+            datos = json.loads(texto)
+            if isinstance(datos, list) and len(datos) > 0:
+                return datos
+        except (ValueError, TypeError):
+            pass
+
+        try:
+            import yaml
+        except ImportError:
+            _LOGGER.warning("PyYAML no disponible; no se puede parsear el texto de precios")
+            return None
+
+        try:
+            datos = yaml.safe_load(texto)
+        except yaml.YAMLError:
+            _LOGGER.warning("Texto de precios con formato YAML no reconocido")
+            return None
+        if isinstance(datos, list) and len(datos) > 0:
+            return datos
+        return None
 
     async def _obtener_session_aiohttp(self):
         """Devuelve la sesión aiohttp compartida de Home Assistant.
@@ -333,17 +367,20 @@ class ClienteOmie:
                     _LOGGER.warning(f"Error creando ranura desde {start_str}: {e}")
                     continue
             
-            # Si tenemos menos de 96 tramos, rellenar con 0.0
+            # Si tenemos menos de 96 tramos, rellenar con 0.0 continuando
+            # la línea temporal desde la última ranura conocida.
             if len(ranuras) < 96:
                 _LOGGER.warning(f"Solo se obtuvieron {len(ranuras)} tramos, rellenando a 96")
-                # Obtener la fecha del primer tramo para rellenar
-                base_date = ranuras[0].fecha_hora_utc.date() if ranuras else fecha
-                for tramo in range(len(ranuras), 96):
-                    hora = tramo // 4
-                    minuto = (tramo % 4) * 15
-                    fecha_hora_utc = datetime(
-                        base_date.year, base_date.month, base_date.day, hora, minuto, tzinfo=UTC
+                num_reales = len(ranuras)
+                if num_reales:
+                    inicio_relleno = (
+                        ranuras[-1].fecha_hora_fin_utc
+                        or ranuras[-1].fecha_hora_utc + timedelta(minutes=15)
                     )
+                else:
+                    inicio_relleno = datetime(fecha.year, fecha.month, fecha.day, tzinfo=UTC)
+                for i in range(num_reales, 96):
+                    fecha_hora_utc = inicio_relleno + timedelta(minutes=15 * (i - num_reales))
                     ranura = Ranura(
                         fecha_hora_utc=fecha_hora_utc,
                         precio_eur_kwh=0.0,

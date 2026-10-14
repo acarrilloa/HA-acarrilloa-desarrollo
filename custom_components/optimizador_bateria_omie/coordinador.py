@@ -158,6 +158,18 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         """Devuelve los datos actuales del coordinador."""
         return self._datos
 
+    def _buscar_ranura(self, ranuras: list[Ranura], ahora: datetime) -> Ranura | None:
+        """Busca la ranura que contiene el instante dado."""
+        for ranura in ranuras:
+            fin_ranura = (
+                ranura.fecha_hora_fin_utc
+                if ranura.fecha_hora_fin_utc
+                else ranura.fecha_hora_utc + timedelta(minutes=15)
+            )
+            if ranura.fecha_hora_utc <= ahora < fin_ranura:
+                return ranura
+        return None
+
     def obtener_precio_actual(self) -> float | None:
         """Obtiene el precio actual."""
         if not self._datos or not self._datos.precios_hoy:
@@ -166,27 +178,28 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
 
         ahora = datetime.now(tz=UTC)
         _LOGGER.debug(f"Buscando precio actual para hora UTC: {ahora.isoformat()}")
-        
-        if not self._datos.precios_hoy:
-            _LOGGER.warning("No hay ranuras de precios para hoy")
-            return None
-            
-        _LOGGER.debug(f"Rango de ranuras: {self._datos.precios_hoy[0].fecha_hora_utc.isoformat()} a {self._datos.precios_hoy[-1].fecha_hora_utc.isoformat()}")
-        
-        for i, ranura in enumerate(self._datos.precios_hoy):
-            inicio_ranura = ranura.fecha_hora_utc
-            # Usar fecha_hora_fin_utc si está disponible, sino calcular
-            fin_ranura = ranura.fecha_hora_fin_utc if ranura.fecha_hora_fin_utc else ranura.fecha_hora_utc + timedelta(minutes=15)
-            _LOGGER.debug(f"Ranura {i}: {inicio_ranura.isoformat()} a {fin_ranura.isoformat()} - {ranura.precio_eur_kwh}€/kWh")
-            if inicio_ranura <= ahora < fin_ranura:
-                _LOGGER.debug(f"Encontrada ranura actual: {i} - {ranura.precio_eur_kwh}€/kWh")
-                return ranura.precio_eur_kwh
+        _LOGGER.debug(
+            f"Rango de ranuras: {self._datos.precios_hoy[0].fecha_hora_utc.isoformat()}"
+            f" a {self._datos.precios_hoy[-1].fecha_hora_utc.isoformat()}"
+        )
+
+        ranura = self._buscar_ranura(self._datos.precios_hoy, ahora)
+        # Entre las 00:00 y las 02:00 locales (CEST) la ranura actual
+        # pertenece al día local siguiente, que ya está en precios_manana.
+        if ranura is None and self._datos.precios_manana:
+            ranura = self._buscar_ranura(self._datos.precios_manana, ahora)
+
+        if ranura is not None:
+            _LOGGER.debug(f"Ranura actual: {ranura.fecha_hora_utc.isoformat()} - {ranura.precio_eur_kwh}€/kWh")
+            return ranura.precio_eur_kwh
 
         _LOGGER.warning(f"No se encontró ranura actual para hora UTC: {ahora.isoformat()}")
-        # Intentar encontrar la ranura más cercana
-        if self._datos.precios_hoy:
-            _LOGGER.warning(f"Fecha de primera ranura: {self._datos.precios_hoy[0].fecha_hora_utc.isoformat()}")
-            _LOGGER.warning(f"Fecha de última ranura: {self._datos.precios_hoy[-1].fecha_hora_utc.isoformat()}")
+        _LOGGER.warning(
+            f"Fecha de primera ranura: {self._datos.precios_hoy[0].fecha_hora_utc.isoformat()}"
+        )
+        _LOGGER.warning(
+            f"Fecha de última ranura: {self._datos.precios_hoy[-1].fecha_hora_utc.isoformat()}"
+        )
         return None
 
     def obtener_precio_efectivo_actual(self) -> float | None:
@@ -204,12 +217,12 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
             return None
 
         ahora = datetime.now(tz=UTC)
-        for ranura in self._datos.precios_hoy:
-            fin_ranura = ranura.fecha_hora_fin_utc if ranura.fecha_hora_fin_utc else ranura.fecha_hora_utc + timedelta(minutes=15)
-            if ranura.fecha_hora_utc <= ahora < fin_ranura:
-                return ranura
-
-        return None
+        ranura = self._buscar_ranura(self._datos.precios_hoy, ahora)
+        # Entre las 00:00 y las 02:00 locales (CEST) la ranura actual
+        # pertenece al día local siguiente, que ya está en precios_manana.
+        if ranura is None and self._datos.precios_manana:
+            ranura = self._buscar_ranura(self._datos.precios_manana, ahora)
+        return ranura
 
     def obtener_clasificacion_actual(self) -> str | None:
         """Obtiene la clasificación actual."""

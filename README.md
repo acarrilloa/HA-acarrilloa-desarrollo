@@ -16,7 +16,7 @@
   - `sensor.ob_precio_clasificacion`: Clasificación del tramo actual (valle/llano/punta)
   - `sensor.ob_precio_estadisticas`: Estadísticas del día (mínimo, máximo, mediana)
 
-### Fases futuras ðŸš§
+### Fases futuras 🚧
 - **F2**: Integración con Solarman para telemetría del inversor Deye
 - **F3**: Predicción de consumo (estadística) + Planificador greedy
 - **F4**: Control real del inversor con salvaguardas

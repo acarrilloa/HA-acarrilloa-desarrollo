@@ -1,4 +1,5 @@
 """Coordinador de datos para la integración Optimizador Batería OMIE."""
+# versión 0.6.5
 
 import logging
 from dataclasses import dataclass
@@ -72,9 +73,9 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
         _LOGGER.info("Actualizando datos de precios OMIE...")
         try:
             # Obtener precios de hoy y mañana
-            hoy = datetime.now(tz=UTC).date()
+            hoy = datetime.now().astimezone().date()      # ← fecha LOCAL
             manana = hoy + timedelta(days=1)
-            _LOGGER.info(f"Obteniendo precios para hoy: {hoy} y mañana: {manana}")
+            _LOGGER.info("Obteniendo precios para hoy: %s y mañana: %s", hoy, manana)
 
             # Obtener precios
             precios_hoy = await self.cliente_omie.obtener_precios_del_dia(hoy)
@@ -136,11 +137,16 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
                 fuente=precios_hoy[0].fuente if precios_hoy else "desconocida",
                 ts_actualizacion=datetime.now(tz=UTC),
             )
-            _LOGGER.info(f"Datos actualizados correctamente. Fuente: {self._datos.fuente}, tramos: {len(self._datos.precios_hoy)}")
+            _LOGGER.info(
+                "Datos actualizados. Fuente: %s, tramos hoy: %d, tramos mañana: %s",
+                self._datos.fuente,
+                len(self._datos.precios_hoy),
+                len(self._datos.precios_manana) if self._datos.precios_manana else 0,
+            )
+            return self._datos       # ← ⚠️ IMPRESCINDIBLE
 
         except Exception as e:
             _LOGGER.exception("Error al actualizar datos")
-            # Crear datos vacíos para evitar que los sensores fallen
             self._datos = DatosOmie(
                 precios_hoy=[],
                 precios_manana=None,
@@ -151,7 +157,7 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
                 fuente="desconocida",
                 ts_actualizacion=datetime.now(tz=UTC),
             )
-            raise UpdateFailed(f"Error al actualizar datos: {e}")
+            raise UpdateFailed(f"Error al actualizar datos: {e}") from e
 
     @property
     def datos(self) -> DatosOmie | None:
@@ -173,34 +179,33 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
     def obtener_precio_actual(self) -> float | None:
         """Obtiene el precio actual."""
         if not self._datos or not self._datos.precios_hoy:
-            _LOGGER.debug("No hay datos de precios hoy")
+            _LOGGER.warning(
+                "obtener_precio_actual: sin datos (%s)",
+                "self._datos=None" if not self._datos else "precios_hoy vacío",
+            )
             return None
 
         ahora = datetime.now(tz=UTC)
-        _LOGGER.debug(f"Buscando precio actual para hora UTC: {ahora.isoformat()}")
+        primera = self._datos.precios_hoy[0].fecha_hora_utc
+        ultima = self._datos.precios_hoy[-1].fecha_hora_utc
         _LOGGER.debug(
-            f"Rango de ranuras: {self._datos.precios_hoy[0].fecha_hora_utc.isoformat()}"
-            f" a {self._datos.precios_hoy[-1].fecha_hora_utc.isoformat()}"
+            "Buscando precio para %s | ventana [%s → %s] | %d ranuras",
+            ahora.isoformat(), primera.isoformat(), ultima.isoformat(),
+            len(self._datos.precios_hoy),
         )
 
         ranura = self._buscar_ranura(self._datos.precios_hoy, ahora)
-        # Entre las 00:00 y las 02:00 locales (CEST) la ranura actual
-        # pertenece al día local siguiente, que ya está en precios_manana.
         if ranura is None and self._datos.precios_manana:
             ranura = self._buscar_ranura(self._datos.precios_manana, ahora)
 
-        if ranura is not None:
-            _LOGGER.debug(f"Ranura actual: {ranura.fecha_hora_utc.isoformat()} - {ranura.precio_eur_kwh}€/kWh")
-            return ranura.precio_eur_kwh
+        if ranura is None:
+            _LOGGER.warning(
+                "No se encontró ranura para %s. Ventana hoy: [%s → %s]",
+                ahora.isoformat(), primera.isoformat(), ultima.isoformat(),
+            )
+            return None
 
-        _LOGGER.warning(f"No se encontró ranura actual para hora UTC: {ahora.isoformat()}")
-        _LOGGER.warning(
-            f"Fecha de primera ranura: {self._datos.precios_hoy[0].fecha_hora_utc.isoformat()}"
-        )
-        _LOGGER.warning(
-            f"Fecha de última ranura: {self._datos.precios_hoy[-1].fecha_hora_utc.isoformat()}"
-        )
-        return None
+        return ranura.precio_eur_kwh
 
     def obtener_precio_efectivo_actual(self) -> float | None:
         """Obtiene el precio efectivo actual."""

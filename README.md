@@ -1,10 +1,10 @@
 ﻿# Optimizador Batería OMIE
 
-![Versión](https://img.shields.io/badge/versión-0.6.4-blue) ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.10.01+-41BDF5) ![Python](https://img.shields.io/badge/Python-3.14+-3776AB)
+![Versión](https://img.shields.io/badge/versión-0.6.5-blue) ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.10.01+-41BDF5) ![Python](https://img.shields.io/badge/Python-3.14+-3776AB)
 
 **Custom component para Home Assistant** que optimiza la carga/descarga de baterías usando precios del mercado eláctrico español con resolución de 15 minutos (MTU15) y la tarifa eláctrica 2.0TD.
 
-## Caracterí­sticas
+## Características
 
 ### Fase F1 (Implementada) …
 - **Obtención de precios OMIE**: Usa la integración OMIE existente (`omie.get_prices_for_date`) como fuente primaria, con fallback a REData y ESIOS

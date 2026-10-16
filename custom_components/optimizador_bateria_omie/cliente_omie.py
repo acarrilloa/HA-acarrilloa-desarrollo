@@ -1,4 +1,5 @@
 """Cliente para obtener precios de OMIE."""
+# versión 0.6.5
 
 import json
 import logging
@@ -75,54 +76,69 @@ class ClienteOmie:
         # (en _write_cache); mkdir() aquí bloquearía el event loop.
 
     async def _obtener_desde_integracion_omie(self, fecha: date) -> list:
-        """Obtiene precios usando los sensores de la plantilla OMIE."""
-        _LOGGER.info("Obteniendo precios de OMIE para fecha: %s", fecha)
+        """Obtiene precios leyendo los sensores de la plantilla OMIE."""
+        # ⚠️ Usar fecha LOCAL: los sensores de la plantilla indexan por now() local
+        hoy_local = datetime.now().astimezone().date()
 
-        hoy = datetime.now(tz=UTC).date()
-        if fecha == hoy - timedelta(days=1):
+        if fecha == hoy_local - timedelta(days=1):
             sensor_entity_id = "sensor.omie_precios_de_es_ayer"
-        elif fecha == hoy:
+        elif fecha == hoy_local:
             sensor_entity_id = "sensor.omie_precios_de_es_hoy"
-        elif fecha == hoy + timedelta(days=1):
+        elif fecha == hoy_local + timedelta(days=1):
             sensor_entity_id = "sensor.omie_precios_de_es_manana"
         else:
-            _LOGGER.warning("Fecha %s fuera del rango de los sensores OMIE", fecha)
+            _LOGGER.warning(
+                "Fecha %s fuera del rango de los sensores OMIE (hoy local=%s)",
+                fecha, hoy_local,
+            )
             return []
 
         state = self.hass.states.get(sensor_entity_id)
         if state is None:
-            _LOGGER.warning("Sensor %s no encontrado en el registro de estados", sensor_entity_id)
+            _LOGGER.warning(
+                "Sensor %s no encontrado en el registro de estados",
+                sensor_entity_id,
+            )
             return []
 
         _LOGGER.debug("Sensor %s encontrado, estado=%s", sensor_entity_id, state.state)
 
         for attr_name in ("precios", "prices", "data", "price_list"):
             datos = state.attributes.get(attr_name)
-            if isinstance(datos, list) and len(datos) > 0:
-                _LOGGER.info(
-                    "Datos válidos de %s.%s → %d intervalos. Primer elemento: %s",
-                    sensor_entity_id, attr_name, len(datos), datos[0],
+
+            # Caso A: lista de dicts {start, price}
+            if isinstance(datos, list) and datos:
+                # Verificamos que el primer elemento tenga el formato esperado
+                primero = datos[0]
+                if isinstance(primero, dict) and "start" in primero and "price" in primero:
+                    _LOGGER.info(
+                        "✅ %s.%s → %d intervalos. Primer: %s | Último: %s",
+                        sensor_entity_id, attr_name, len(datos),
+                        datos[0], datos[-1],
+                    )
+                    return datos
+                _LOGGER.warning(
+                    "Sensor %s.%s con formato inesperado: %s",
+                    sensor_entity_id, attr_name, primero,
                 )
-                return datos
-            # Algunas versiones de la integración OMIE exponen los precios
-            # como texto (JSON o YAML) en lugar de una lista.
+
+            # Caso B: texto JSON/YAML
             if isinstance(datos, str) and datos.strip():
                 datos_parseados = self._parse_texto_precios(datos)
                 if datos_parseados:
                     _LOGGER.info(
-                        "Datos parseados de %s.%s → %d intervalos",
+                        "✅ %s.%s parseado desde texto → %d intervalos",
                         sensor_entity_id, attr_name, len(datos_parseados),
                     )
                     return datos_parseados
+
             if attr_name in state.attributes:
                 _LOGGER.debug(
-                    "Atributo %s.%s presente pero vacío (%s)",
+                    "Atributo %s.%s vacío o inválido (%s)",
                     sensor_entity_id, attr_name, type(datos).__name__,
                 )
 
-        # Ningún atributo con datos → devolvemos [] para que el llamador
-        # (obtener_precios_del_dia) intente REData / ESIOS como fallback.
-        _LOGGER.info("Sensor %s sin datos de precios todavía", sensor_entity_id)
+        _LOGGER.info("Sensor %s sin datos todavía", sensor_entity_id)
         return []
 
     def _parse_texto_precios(self, texto: str) -> list | None:
@@ -444,82 +460,107 @@ class ClienteOmie:
             with open(cache_file, "w", encoding="utf-8") as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
 
-        # Verificar cache
+        # Verificar cache      
         if self.config.usar_cache:
             try:
                 cached_data = await self.hass.async_add_executor_job(_read_cache)
-                if cached_data is not None:
+                # Solo usar caché si tiene datos reales
+                if cached_data and len(cached_data) == 96:
+                    _LOGGER.info(
+                        "Cache válida para %s → %d ranuras",
+                        fecha, len(cached_data),
+                    )
                     return [
                         Ranura(
                             fecha_hora_utc=datetime.fromisoformat(d["fecha_hora_utc"]),
                             precio_eur_kwh=d["precio_eur_kwh"],
                             fuente=d["fuente"],
                             fecha_publicacion=datetime.fromisoformat(d["fecha_publicacion"]),
-                            fecha_hora_fin_utc=datetime.fromisoformat(d["fecha_hora_fin_utc"]) if d.get("fecha_hora_fin_utc") else None,
+                            fecha_hora_fin_utc=(
+                                datetime.fromisoformat(d["fecha_hora_fin_utc"])
+                                if d.get("fecha_hora_fin_utc") else None
+                            ),
                         )
                         for d in cached_data
                     ]
             except (OSError, ValueError) as e:
-                _LOGGER.warning(f"Error leyendo cache: {e}")
+                _LOGGER.warning("Error leyendo cache: %s", e)     
 
-        # Obtener datos de la fuente prioritaria
-        try:
+        # 
+        # Obtener datos de la fuente prioritaria (cascada de fallbacks)
+        # 
+        datos = None
+        fuente = None
+
+        # 1) Integración OMIE
+        if self.config.fuente_prioritaria == "omie" and "omie" in self.hass.config.components:
+            try:
+                datos = await self._obtener_desde_integracion_omie(fecha)
+                fuente = "omie"
+                _LOGGER.info(
+                    "Datos obtenidos de OMIE: tipo=%s, longitud=%d",
+                    type(datos).__name__, len(datos or []),
+                )
+            except ErrorIntegracionNoDisponible as e:
+                _LOGGER.warning("Integración OMIE no disponible: %s", e)
+                datos = None
+            # Fallback: cualquier fallo de la fuente externa OMIE
+            # (integración, red, publicación pendiente...) cae al siguiente proveedor.
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning("Error al obtener datos de OMIE: %s (%s)", e, type(e).__name__)
+                if "have not been published yet" in str(e):
+                    _LOGGER.warning("Los precios de mañana no están publicados aún, usando fallback")
+                datos = None
+
+        # 2) REData
+        if not datos:
+            try:
+                datos = await self._obtener_desde_redata(fecha)
+                fuente = "redata"
+                _LOGGER.info(
+                    "Datos obtenidos de REData: tipo=%s, longitud=%d",
+                    type(datos).__name__, len(datos or []),
+                )
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning("Error al obtener datos de REData: %s", e)
+                datos = None
+
+        # 3) ESIOS
+        if not datos:
+            try:
+                datos = await self._obtener_desde_esios(fecha)
+                fuente = "esios"
+                _LOGGER.info(
+                    "Datos obtenidos de ESIOS: tipo=%s, longitud=%d",
+                    type(datos).__name__, len(datos or []),
+                )
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning("Error al obtener datos de ESIOS: %s", e)
+                datos = None
+
+        # 4) Descarte si todos los precios son 0.0 (fuente devolvió "vacío")
+        if datos and all(
+            isinstance(d, dict) and float(d.get("price", 0)) == 0.0
+            for d in datos
+        ):
+            _LOGGER.warning("Todos los precios recibidos son 0.0, descartando fuente")
             datos = None
             fuente = None
-            
-            # Intentar obtener de la integración OMIE
-            if self.config.fuente_prioritaria == "omie" and "omie" in self.hass.config.components:
-                try:
-                    datos = await self._obtener_desde_integracion_omie(fecha)
-                    fuente = "omie"
-                    _LOGGER.info(f"Datos obtenidos de OMIE: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                except ErrorIntegracionNoDisponible as e:
-                    _LOGGER.warning(f"Integración OMIE no disponible: {e}")
-                    datos = None
-                # Excepcionalidad aceptada: cualquier fallo de la integración
-                # OMIE (fuente externa) debe caer al fallback, no romper el setup.
-                except Exception as e:  # noqa: BLE001
-                    _LOGGER.warning(f"Error al obtener datos de OMIE: {e}")
-                    _LOGGER.warning(f"Tipo de error: {type(e)}")
 
-                    # Mensajes conocidos de error
-                    if "have not been published yet" in str(e):
-                        _LOGGER.warning("Los precios no están publicados aún, usando fallback REData")
-                    datos = None
-            
-            # Si no se obtuvieron datos de OMIE o OMIE no es la fuente prioritaria, usar fallback
-            if not datos:  # None o lista vacía
-                try:
-                    datos = await self._obtener_desde_redata(fecha)
-                    fuente = "redata"
-                    _LOGGER.info(f"Datos obtenidos de REData: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                # Fallback: cualquier fallo de la fuente externa REData
-                # deja pasar a la siguiente fuente.
-                except Exception as e:  # noqa: BLE001
-                    _LOGGER.warning(f"Error al obtener datos de REData: {e}")
-                    datos = None
-
-                if not datos:   # None o lista vacía
-                    try:
-                        datos = await self._obtener_desde_esios(fecha)
-                        fuente = "esios"
-                        _LOGGER.info(f"Datos obtenidos de ESIOS: tipo={type(datos)}, longitud={len(datos) if datos else 0}")
-                    # Fallback: cualquier fallo de la fuente externa ESIOS
-                    # se registra y termina la cascada de fuentes.
-                    except Exception as e:  # noqa: BLE001
-                        _LOGGER.warning(f"Error al obtener datos de ESIOS: {e}")
-                        datos = None
-            
-            if not datos:
-                raise ErrorFuenteOmie("Todas las fuentes fallaron")
-        except ErrorFuenteOmie:
+        # 5) Si seguimos sin datos, abortamos y dejamos que suba la excepción
+        if not datos:
             raise ErrorFuenteOmie("Todas las fuentes fallaron")
 
-        # Normalizar datos a 96 tramos
-        _LOGGER.info(f"Normalizando datos para {fecha}. Tipo: {type(datos)}, Longitud: {len(datos) if datos else 0}")
+        # 
+        # Normalizar datos a 96 tramos de 15 min
+        # 
+        _LOGGER.info(
+            "Normalizando datos para %s. Tipo=%s, Longitud=%d",
+            fecha, type(datos).__name__, len(datos),
+        )
         ranuras = self._normalizar_a_15min(datos, fecha)
-        _LOGGER.info(f"Normalización completada: {len(ranuras)} ranuras")
-        
+        _LOGGER.info("Normalización completada: %d ranuras", len(ranuras))
+
         # Actualizar fuente en todas las ranuras
         for ranura in ranuras:
             ranura.fuente = fuente
@@ -529,6 +570,6 @@ class ClienteOmie:
             try:
                 await self.hass.async_add_executor_job(_write_cache, ranuras)
             except (OSError, ValueError) as e:
-                _LOGGER.warning(f"Error escribiendo cache: {e}")
+                _LOGGER.warning("Error escribiendo cache: %s", e)
 
         return ranuras

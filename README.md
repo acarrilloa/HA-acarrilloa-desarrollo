@@ -1,22 +1,30 @@
 ﻿# Optimizador Batería OMIE
 
-![Versión](https://img.shields.io/badge/versión-0.6.5-blue) ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.10.01+-41BDF5) ![Python](https://img.shields.io/badge/Python-3.14+-3776AB)
+![Versión](https://img.shields.io/badge/versión-0.7.0-blue)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.6+-41BDF5)
+![Python](https://img.shields.io/badge/Python-3.12+-3776AB)
 
 **Custom component para Home Assistant** que optimiza la carga/descarga de baterías usando precios del mercado eláctrico español con resolución de 15 minutos (MTU15) y la tarifa eláctrica 2.0TD.
 
 ## Características
 
 ### Fase F1 (Implementada) …
-- **Obtención de precios OMIE**: Usa la integración OMIE existente (`omie.get_prices_for_date`) como fuente primaria, con fallback a REData y ESIOS
-- **Precio efectivo**: Cálculo del precio real de compra incluyendo peajes, cargos e impuestos según la tarifa 2.0TD
-- **Clasificación de tramos**: Identifica automáticamente períodos punta, llano y valle (laborables) o valle todo el día (festivos, fines de semana)
-- **Sensores disponibles**:
-  - `sensor.ob_precio_actual`: Precio del tramo actual en €/kWh
-  - `sensor.ob_precio_efectivo`: Precio efectivo con peajes, cargos e impuestos
-  - `sensor.ob_precio_clasificacion`: Clasificación del tramo actual (valle/llano/punta)
-  - `sensor.ob_precio_estadisticas`: Estadísticas del día (mínimo, máximo, mediana)
+
+- **Obtención de precios OMIE a 15 min** vía los sensores de plantilla `sensor.omie_precios_de_es_{ayer,hoy,manana}` (creados con la integración oficial OMIE `omie.get_prices_for_date`).
+- **Fallback REData** (`api.preciodelaluz.es`) si los sensores de plantilla no tienen datos.
+- **Caché en disco** por día (`custom_components/optimizador_bateria_omie/cache/YYYY-MM-DD.json`), validada a 96 tramos. Sobrevive a reinicios y evita saturar las fuentes.
+- **Precio efectivo**: spot + peajes + cargos + impuestos 2.0TD (según `tarifa.py`).
+- **Clasificación de tramos** por percentiles (valle / llano / punta) sobre los precios efectivos del día.
+- **Cuatro sensores**:
+  - `sensor.inversor_optimizador_bateria_omie_precio_actual` — precio del tramo actual en €/kWh; atributo `fuente` (`omie`, `redata`, `desconocida`).
+  - `sensor.inversor_optimizador_bateria_omie_precio_efectivo` — precio con peajes, cargos e impuestos.
+  - `sensor.inversor_optimizador_bateria_omie_clasificacion` — `valle` / `llano` / `punta`.
+  - `sensor.inversor_optimizador_bateria_omie_estadisticas` — estado = **mediana** del día; atributos `min`, `max`, `mediana`, `fuente`, `ts_actualizacion`.
+
+> **Nota sobre el prefijo `inversor_`**: los `entity_id` dependen del nombre del dispositivo/entrada de configuración. Si renombras el dispositivo en HA, los IDs cambiarán. Los ejemplos aquí usan el nombre que aparece por defecto en nuestra instalación de referencia.
 
 ### Fases futuras 🚧
+
 - **F2**: Integración con Solarman para telemetría del inversor Deye
 - **F3**: Predicción de consumo (estadística) + Planificador greedy
 - **F4**: Control real del inversor con salvaguardas
@@ -25,9 +33,64 @@
 
 ## Requisitos
 
-- **Home Assistant**: 2026.10.1 o superior
-- **Python**: 3.14 o superior
-- **Integración OMIE**: Recomendada (pero no obligatoria, hay fallback a REData)
+- **Home Assistant**: 2024.6 o superior (usa `async_forward_entry_setups` nativo).
+- **Python**: 3.12 o superior.
+- **Integración oficial OMIE** instalada y con la plantilla `precios_omie.yaml` activa (ver [Dependencias de F1](#dependencias-de-f1)).
+- **Opcional**: acceso a internet para fallback REData.
+
+## Dependencias de F1: la plantilla de precios
+
+F1 **no llama directamente a la API de OMIE**. En su lugar consume tres sensores que crea una plantilla `template:` en tu `configuration.yaml` (o en un paquete). La integración oficial OMIE se encarga de la descarga, y nuestra plantilla la expone como atributos `precios` con 96 tramos de 15 min por día:
+
+```yaml
+# precios_omie.yaml
+- trigger:
+    - platform: homeassistant
+      event: start
+    - platform: time
+      at: "13:35:00"          # publicación D+1 de OMIE
+    - platform: time
+      at: "00:05:00"          # rotación de día
+  action:
+    - action: omie.get_prices_for_date
+      data:
+        date: "{{ (now() - timedelta(days=1)).date() }}"
+        countries: [es, pt]
+      response_variable: precios_ayer
+      continue_on_error: true
+    - action: omie.get_prices_for_date
+      data:
+        date: "{{ now().date() }}"
+        countries: [es, pt]
+      response_variable: precios_hoy
+      continue_on_error: true
+    - if:
+        - condition: template
+          value_template: >
+            {{ now().hour > 13 or (now().hour == 13 and now().minute >= 35) }}
+      then:
+        - action: omie.get_prices_for_date
+          data:
+            date: "{{ (now() + timedelta(days=1)).date() }}"
+            countries: [es, pt]
+          response_variable: precios_manana
+          continue_on_error: true
+      else:
+        - variables:
+            precios_manana: {}
+  sensor:
+    - name: "OMIE precios de ES ayer"
+      unique_id: omie_precios_es_ayer
+      state: "{{ now().isoformat() }}"
+      attributes:
+        precios: >
+          {% set datos = (precios_ayer | default({})).es | default([]) %}
+          {% set ns = namespace(out=[]) %}
+          {% for d in datos %}
+            {% set ns.out = ns.out + [{'start': d.start, 'price': d.price | float | round(4)}] %}
+          {% endfor %}
+          {{ ns.out }}
+    # ... análogos para _hoy y _manana
 
 ## Instalación
 

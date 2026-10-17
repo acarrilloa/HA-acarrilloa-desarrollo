@@ -6,7 +6,115 @@
 
 ---
 
+> **Estado del documento** (2026-10): F1 completada y en producción doméstica. F2–F6 pendientes. Este documento mantiene la visión completa pero marca explícitamente lo que ya está implementado y lo que es todavía diseño.
+
+---
+
 ## 1. Visión general
+
+El componente se ejecuta dentro de Home Assistant y:
+
+1. **F1 ✅** Obtiene los precios del mercado diario OMIE con resolución de 15 minutos (MTU15) **vía los sensores de plantilla** que crea la integración oficial OMIE, con fallback a REData.
+2. **F2 🚧** Lee por Solarman (Modbus local) el estado del inversor Deye: SOC, potencias, consumo de casa, producción FV, estado de red.
+3. **F3 🚧** Predice el consumo de la casa con un modelo estadístico (F3) o ML (F5).
+4. **F5 🚧** Calcula un plan por tramos de 15 min con autoconsumo + arbitraje.
+5. **F4 🚧** Aplica el plan escribiendo en el inversor con salvaguardas (dry-run, límite de escrituras, watchdog, fallback).
+
+Prioridad de estrategia: **autoconsumo + arbitraje cuando convenga**.
+
+---
+
+## 2. Contexto del sistema existente
+
+| Elemento | Detalle |
+|---|---|
+| Plataforma | Home Assistant Yellow (HAOS) |
+| Inversor | Deye SUN-6K-SG05LP1-EU-AM2-P — 6.000 W, PV máx. 7.800 W, batería 40–60 V, corriente máx. carga/descarga **0–135 A** |
+| Batería | Docan 51,2 V 300 Ah LiFePO4 (15,36 kWh nominales); fabricante recomienda 140 A (máx. 200 A), límite real del inversor 135 A |
+| Datalogger | Solarman serie **3178171873**, IP fija **192.168.1.76** |
+| Históricos | Node-RED + InfluxDB (producción y consumo), estadísticas de HA |
+| **Sensores OMIE** | **Integración oficial OMIE + plantilla `precios_omie.yaml`** (ver §5.1). Sustituye la plantilla RESTful previa `config/plantillas/energia.yaml`. |
+| Clima | Integración weather de HA (definir en F3) |
+| Tarifa | 2.0TD con **5,75 kW contratados**; peajes y cargos en §5.6 |
+| Remuneración excedentes | **Al mismo precio que la compra** (contrato con mayorista) |
+
+---
+
+## 3. Requisitos funcionales
+
+### RF-01 — Precios OMIE a 15 minutos
+- **F1 ✅** Obtener precio del mercado diario español (MDA) a **15 min** para hoy y mañana, en €/kWh.
+- **F1 ✅** Fuentes en cascada: **sensores de plantilla** `sensor.omie_precios_de_es_{ayer,hoy,manana}` (creados por el usuario con `omie.get_prices_for_date`) → **REData** (`api.preciodelaluz.es`). ESIOS **eliminado** (placeholder); llegará cuando se implemente de verdad.
+- **F1 ✅** Caché por día en disco (`cache/YYYY-MM-DD.json`), validada a 96 tramos.
+- **F1 ✅** Refresco: coordinador cada 15 min + triggers de la plantilla (13:35 y 00:05) + reinicio HA.
+- **F1 ✅** Exponer precio actual, precio efectivo, clasificación por percentiles y estadísticas.
+
+### RF-02 — Telemetría Solarman 🚧 F2
+Sin cambios respecto al diseño original: `pysolarmanv5` en executor, polling cada 30 s, `registers.yaml` configurable y validación por `probe_registers`.
+
+### RF-03 — Control de carga/descarga 🚧 F4
+Sin cambios. Mapa de registros configurable, write-verify, límite de escrituras por hora.
+
+### RF-04 — Compra/venta con parámetros ajustables 🚧 F4/F5
+Sin cambios. Restricción dura: importación total (consumo + carga batería) ≤ **5,75 kW**.
+
+### RF-05 — Predicción de consumo 🚧 F3/F5
+Sin cambios.
+
+### RF-06 — Planificador y ejecutor 🚧 F3/F4
+Sin cambios.
+
+---
+
+## 4. Arquitectura
+
+Igual que en el diseño original. En F1 solo están activos los módulos:
+
+- `ClienteOmie` (equivalente a `OmieClient`)
+- `ModeloTarifa` (equivalente a `TariffModel`)
+- `CoordinadorDatosOmie` (equivalente a `Coordinator`)
+- Entidades y `config_flow`
+
+Los módulos `Forecaster`, `Planner`, `Executor`, `SolarmanClient` **no existen todavía**.
+
+Diagrama (sin cambios conceptuales):
+
+```mermaid
+flowchart TD
+  subgraph Fuentes
+    OMIE["Integración OMIE + plantilla\n(sensores omie_precios_de_es_*)"]
+    REDATA["REData\n(fallback)"]
+    SOLAR["Datalogger Solarman\n(F2+)"]
+    WEATHER["Clima / calendario\n(F3+)"]
+    HIST["Histórico consumo\n(F3+)"]
+  end
+  subgraph Componente["optimizador_bateria_omie"]
+    PRICE["ClienteOmie ✅"]
+    TARIFF["ModeloTarifa ✅"]
+    TELEM["SolarmanClient 🚧"]
+    FORECAST["ConsumptionForecaster 🚧"]
+    PLANNER["Planner 🚧"]
+    EXECUTOR["Executor 🚧"]
+    CONFIG["Config Flow + Entidades ✅"]
+    AUDIT["Audit / Stats 🚧"]
+  end
+  OMIE --> PRICE
+  REDATA --> PRICE
+  SOLAR --> TELEM
+  HIST --> FORECAST
+  WEATHER --> FORECAST
+  PRICE --> TARIFF
+  TARIFF --> PLANNER
+  FORECAST --> PLANNER
+  TELEM --> PLANNER
+  CONFIG --> PLANNER
+  PLANNER --> EXECUTOR
+  EXECUTOR --> SOLAR
+  PLANNER --> AUDIT
+
+--------
+
+## 1. Visión general - original
 
 El componente se ejecuta dentro de Home Assistant y:
 

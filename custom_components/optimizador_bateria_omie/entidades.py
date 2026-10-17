@@ -1,12 +1,9 @@
 """Entidades (sensores) para la integración Optimizador Batería OMIE."""
-# versión 0.6.6
+# versión 0.7.0
 
 from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-)
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.optimizador_bateria_omie.const import (
     ATTR_FUENTE,
@@ -22,14 +19,13 @@ from custom_components.optimizador_bateria_omie.const import (
 )
 
 
-class SensorBase(CoordinatorEntity):
+class SensorBase(CoordinatorEntity, SensorEntity):
     """Clase base para los sensores."""
 
     _attr_has_entity_name = True
 
     @property
     def device_info(self) -> DeviceInfo:
-        """Información del dispositivo."""
         return DeviceInfo(
             identifiers={(DOMAIN, "optimizador_bateria_omie")},
             name="Optimizador Batería OMIE",
@@ -41,144 +37,63 @@ class SensorBase(CoordinatorEntity):
 class SensorPrecioActual(SensorBase):
     """Sensor para el precio actual de la electricidad."""
 
-    @property
-    def unique_id(self) -> str:
-        """ID único del sensor."""
-        return SENSOR_PRECIO_ACTUAL
-
-    @property
-    def name(self) -> str:
-        """Nombre del sensor."""
-        return "Precio actual"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Unidad de medida nativa."""
-        return "€/kWh"
+    _attr_unique_id = SENSOR_PRECIO_ACTUAL
+    _attr_name = "Precio actual"
+    _attr_native_unit_of_measurement = "€/kWh"
 
     @property
     def native_value(self) -> float | None:
-        """Valor nativo del sensor."""
         precio = self.coordinator.obtener_precio_actual()
         return round(precio, 4) if precio is not None else None
 
     @property
-    def available(self) -> bool:
-        """Indica si el sensor está disponible."""
-        return self.coordinator.obtener_precio_actual() is not None
-
-    @property
-    def extra_state_attributes(self) -> dict | None:
-        """Atributos adicionales: fuente de los datos."""
-        datos = self.coordinator.datos
-        if datos is not None:
-            return {ATTR_FUENTE: datos.fuente}
-        return None
+    def extra_state_attributes(self) -> dict:
+        return {ATTR_FUENTE: self.coordinator.datos.fuente}
 
 
 class SensorPrecioEfectivo(SensorBase):
     """Sensor para el precio efectivo (con peajes, cargos e impuestos)."""
 
-    @property
-    def unique_id(self) -> str:
-        """ID único del sensor."""
-        return SENSOR_PRECIO_EFECTIVO
-
-    @property
-    def name(self) -> str:
-        """Nombre del sensor."""
-        return "Precio efectivo"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Unidad de medida nativa."""
-        return "€/kWh"
+    _attr_unique_id = SENSOR_PRECIO_EFECTIVO
+    _attr_name = "Precio efectivo"
+    _attr_native_unit_of_measurement = "€/kWh"
 
     @property
     def native_value(self) -> float | None:
-        """Valor nativo del sensor."""
         precio = self.coordinator.obtener_precio_efectivo_actual()
         return round(precio, 4) if precio is not None else None
-
-    @property
-    def available(self) -> bool:
-        """Indica si el sensor está disponible."""
-        return self.coordinator.obtener_precio_efectivo_actual() is not None
 
 
 class SensorPrecioClasificacion(SensorBase):
     """Sensor para la clasificación del precio (valle, llano, punta)."""
 
-    @property
-    def unique_id(self) -> str:
-        """ID único del sensor."""
-        return SENSOR_PRECIO_CLASIFICACION
-
-    @property
-    def name(self) -> str:
-        """Nombre del sensor."""
-        return "Clasificación"
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Unidad de medida nativa."""
-        return None
+    _attr_unique_id = SENSOR_PRECIO_CLASIFICACION
+    _attr_name = "Clasificación"
 
     @property
     def native_value(self) -> str | None:
-        """Valor nativo del sensor."""
         return self.coordinator.obtener_clasificacion_actual()
-
-    @property
-    def available(self) -> bool:
-        """Indica si el sensor está disponible."""
-        return self.coordinator.obtener_clasificacion_actual() is not None
 
 
 class SensorPrecioEstadisticas(SensorBase):
     """Sensor para estadísticas de precios."""
 
-    @property
-    def unique_id(self) -> str:
-        """ID único del sensor."""
-        return SENSOR_PRECIO_ESTADISTICAS
-
-    @property
-    def name(self) -> str:
-        """Nombre del sensor."""
-        return "Estadísticas"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Unidad de medida nativa."""
-        return "€/kWh"
+    _attr_unique_id = SENSOR_PRECIO_ESTADISTICAS
+    _attr_name = "Estadísticas"
+    _attr_native_unit_of_measurement = "€/kWh"
 
     @property
     def native_value(self) -> float | None:
-        """Valor nativo del sensor (mediana)."""
-        estadisticas = self.coordinator.obtener_estadisticas_actual()
-        if estadisticas:
-            return estadisticas.get(ATTR_MEDIANA, 0)
-        return None
+        return self.coordinator.obtener_estadisticas_actual().get(ATTR_MEDIANA, 0)
 
     @property
-    def available(self) -> bool:
-        """Indica si el sensor está disponible."""
-        return self.coordinator.obtener_estadisticas_actual() is not None
-
-    @property
-    def extra_state_attributes(self) -> dict | None:
-        """Atributos adicionales del estado."""
-        estadisticas = self.coordinator.obtener_estadisticas_actual()
-        if not estadisticas:
-            return None
+    def extra_state_attributes(self) -> dict:
+        est = self.coordinator.obtener_estadisticas_actual()
         datos = self.coordinator.datos
         return {
-            ATTR_MIN: estadisticas.get(ATTR_MIN, 0),
-            ATTR_MAX: estadisticas.get(ATTR_MAX, 0),
-            ATTR_MEDIANA: estadisticas.get(ATTR_MEDIANA, 0),
-            ATTR_FUENTE: datos.fuente if datos else None,
-            ATTR_TS_ACTUALIZACION: (
-                datos.ts_actualizacion.isoformat() if datos else None
-            ),
+            ATTR_MIN: est.get(ATTR_MIN, 0),
+            ATTR_MAX: est.get(ATTR_MAX, 0),
+            ATTR_MEDIANA: est.get(ATTR_MEDIANA, 0),
+            ATTR_FUENTE: datos.fuente,
+            ATTR_TS_ACTUALIZACION: datos.ts_actualizacion.isoformat(),
         }

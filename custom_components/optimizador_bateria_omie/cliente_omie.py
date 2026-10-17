@@ -1,5 +1,5 @@
 """Cliente para obtener precios de OMIE."""
-# versión 0.6.5
+# versión 0.7.0
 
 import json
 import logging
@@ -36,7 +36,6 @@ class Ranura:
         fecha_publicacion: datetime,
         fecha_hora_fin_utc: datetime | None = None,
     ):
-        """Inicializa la ranura con su precio y ventana horaria en UTC."""
         self.fecha_hora_utc = fecha_hora_utc
         self.precio_eur_kwh = precio_eur_kwh
         self.fuente = fuente
@@ -44,7 +43,6 @@ class Ranura:
         self.fecha_hora_fin_utc = fecha_hora_fin_utc
 
     def __eq__(self, other):
-        """Comparación para tests."""
         if not isinstance(other, Ranura):
             return False
         return (
@@ -58,10 +56,8 @@ class ErrorFuenteOmie(Exception):
     """Error al obtener datos de una fuente OMIE."""
 
 
-
 class ErrorIntegracionNoDisponible(Exception):
     """Error cuando la integración OMIE no está disponible."""
-
 
 
 class ClienteOmie:
@@ -70,14 +66,15 @@ class ClienteOmie:
     def __init__(self, hass, config: ConfiguracionOmie):
         self.hass = hass
         self.config = config
-        # Usar custom_components/optimizador_bateria_omie/cache
-        self._dir_cache = Path(hass.config.config_dir) / "custom_components" / DOMAIN / "cache"
-        # El directorio se crea bajo demanda dentro del executor
-        # (en _write_cache); mkdir() aquí bloquearía el event loop.
+        self._dir_cache = (
+            Path(hass.config.config_dir)
+            / "custom_components"
+            / DOMAIN
+            / "cache"
+        )
 
     async def _obtener_desde_integracion_omie(self, fecha: date) -> list:
-        """Obtiene precios leyendo los sensores de la plantilla OMIE."""
-        # ⚠️ Usar fecha LOCAL: los sensores de la plantilla indexan por now() local
+        """Lee los precios de los sensores de la plantilla OMIE."""
         hoy_local = datetime.now().astimezone().date()
 
         if fecha == hoy_local - timedelta(days=1):
@@ -95,381 +92,94 @@ class ClienteOmie:
 
         state = self.hass.states.get(sensor_entity_id)
         if state is None:
-            _LOGGER.warning(
-                "Sensor %s no encontrado en el registro de estados",
-                sensor_entity_id,
-            )
+            _LOGGER.warning("Sensor %s no encontrado", sensor_entity_id)
             return []
 
-        _LOGGER.debug("Sensor %s encontrado, estado=%s", sensor_entity_id, state.state)
-
-        for attr_name in ("precios", "prices", "data", "price_list"):
-            datos = state.attributes.get(attr_name)
-
-            # Caso A: lista de dicts {start, price}
-            if isinstance(datos, list) and datos:
-                # Verificamos que el primer elemento tenga el formato esperado
-                primero = datos[0]
-                if isinstance(primero, dict) and "start" in primero and "price" in primero:
-                    _LOGGER.info(
-                        "✅ %s.%s → %d intervalos. Primer: %s | Último: %s",
-                        sensor_entity_id, attr_name, len(datos),
-                        datos[0], datos[-1],
-                    )
-                    return datos
-                _LOGGER.warning(
-                    "Sensor %s.%s con formato inesperado: %s",
-                    sensor_entity_id, attr_name, primero,
-                )
-
-            # Caso B: texto JSON/YAML
-            if isinstance(datos, str) and datos.strip():
-                datos_parseados = self._parse_texto_precios(datos)
-                if datos_parseados:
-                    _LOGGER.info(
-                        "✅ %s.%s parseado desde texto → %d intervalos",
-                        sensor_entity_id, attr_name, len(datos_parseados),
-                    )
-                    return datos_parseados
-
-            if attr_name in state.attributes:
+        datos = state.attributes.get("precios")
+        if isinstance(datos, list) and datos:
+            if isinstance(datos[0], dict) and "start" in datos[0] and "price" in datos[0]:
                 _LOGGER.debug(
-                    "Atributo %s.%s vacío o inválido (%s)",
-                    sensor_entity_id, attr_name, type(datos).__name__,
+                    "%s → %d intervalos", sensor_entity_id, len(datos),
                 )
-
-        _LOGGER.info("Sensor %s sin datos todavía", sensor_entity_id)
-        return []
-
-    def _parse_texto_precios(self, texto: str) -> list | None:
-        """Parsea un atributo de precios en texto (JSON o YAML)."""
-        try:
-            datos = json.loads(texto)
-            if isinstance(datos, list) and len(datos) > 0:
                 return datos
-        except (ValueError, TypeError):
-            pass
 
-        try:
-            import yaml
-        except ImportError:
-            _LOGGER.warning("PyYAML no disponible; no se puede parsear el texto de precios")
-            return None
-
-        try:
-            datos = yaml.safe_load(texto)
-        except yaml.YAMLError:
-            _LOGGER.warning("Texto de precios con formato YAML no reconocido")
-            return None
-        if isinstance(datos, list) and len(datos) > 0:
-            return datos
-        return None
-
-    async def _obtener_session_aiohttp(self):
-        """Devuelve la sesión aiohttp compartida de Home Assistant.
-
-        Se usa la sesión gestionada por HA en lugar de crear una nueva
-        ``aiohttp.ClientSession`` por petición, que generaría fugas de
-        conexiones.
-        """
-        # Import diferido: mantiene el módulo importable sin Home Assistant
-        # (necesario para los tests unitarios del cliente).
-        from homeassistant.helpers.aiohttp_client import async_get_clientsession
-
-        return async_get_clientsession(self.hass)
+        _LOGGER.info("Sensor %s sin datos de precios", sensor_entity_id)
+        return []
 
     async def _obtener_desde_redata(self, fecha: date) -> list:
         """Obtiene precios desde REData (fallback)."""
-        url = f"https://api.preciodelaluz.es/v1/prices?date={fecha.strftime('%Y-%m-%d')}"
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-        _LOGGER.info(f"Obteniendo precios de REData para {fecha}")
-        session = await self._obtener_session_aiohttp()
+        url = f"https://api.preciodelaluz.es/v1/prices?date={fecha.strftime('%Y-%m-%d')}"
+        session = async_get_clientsession(self.hass)
+
         async with session.get(url) as response:
             if response.status != 200:
-                raise ErrorFuenteOmie(f"REData devuelve status {response.status}")
+                raise ErrorFuenteOmie(f"REData status {response.status}")
             data = await response.json()
-            _LOGGER.info(f"REData devolvió: tipo={type(data)}, keys={data.keys() if isinstance(data, dict) else 'N/A'}")
 
-            # Manejar diferentes formatos de respuesta
-            if isinstance(data, dict):
-                if "data" in data:
-                    datos = data["data"]
-                    _LOGGER.info(f"Datos de REData: {len(datos) if isinstance(datos, list) else type(datos)}")
-                    return datos
-                elif isinstance(data, list):
-                    return data
-                else:
-                    _LOGGER.error(f"Formato de REData inesperado: {data}")
-                    return []
-            elif isinstance(data, list):
-                return data
-            else:
-                _LOGGER.error(f"Tipo de respuesta de REData inesperado: {type(data)}")
-                return []
-
-    async def _obtener_desde_esios(self, fecha: date) -> list:
-        """Obtiene precios desde ESIOS (fallback alternativo)."""
-        # Implementación placeholder para ESIOS
+        if isinstance(data, dict) and "data" in data:
+            return data["data"]
+        if isinstance(data, list):
+            return data
+        _LOGGER.error("Formato de REData inesperado: %s", type(data).__name__)
         return []
 
     def _normalizar_a_15min(self, datos: list, fecha: date) -> list:
-        """Normaliza datos a tramos de 15 minutos (96 tramos por día).
-        
-        Formato esperado de omie.get_prices_for_date:
-        [
-            {"start": "2026-10-06T00:00:00+02:00", "end": "2026-10-06T00:15:00+02:00", "price": 0.20831},
-            {"start": "2026-10-06T00:15:00+02:00", "end": "2026-10-06T00:30:00+02:00", "price": 0.20731},
-            ...
-        ]
-        """
-        _LOGGER.debug(f"Normalizando datos para {fecha}. Tipo: {type(datos)}, Valor: {datos}")
-        ranuras = []
-        
-        # Datos_por_tramo: diccionario {tramo: precio}
-        datos_por_tramo = {}
-        
-        # Si datos no es una lista, convertirlo
-        if datos is None:
-            _LOGGER.warning("Datos es None, devolviendo lista vacía")
-            return ranuras
-        
-        if not isinstance(datos, list):
-            _LOGGER.warning(f"Datos no es una lista, es {type(datos)}. Intentando convertir...")
-            if isinstance(datos, dict):
-                # Si es un diccionario, intentar extraer la lista de precios
-                # Formato OMIE: {'es': [...], 'pt': [...]}
-                if "es" in datos:
-                    datos = datos["es"]
-                    _LOGGER.info("Datos extraídos de la clave 'es'")
-                elif "data" in datos:
-                    datos = datos["data"]
-                elif "prices" in datos:
-                    datos = datos["prices"]
-                else:
-                    _LOGGER.error(f"Diccionario no contiene claves esperadas. Claves disponibles: {list(datos.keys())}")
-                    return ranuras
-            else:
-                _LOGGER.error(f"Tipo de datos no soportado: {type(datos)}")
-                return ranuras
-        
-        if datos:
-            _LOGGER.debug(f"Primer dato: {datos[0] if isinstance(datos, list) else datos}")
-        
-        # Intentar diferentes formatos de entrada
-        for item in datos:
-            # Formato OMIE (start, end, price con timezone)
-            if isinstance(item, dict) and "start" in item and "price" in item:
-                start_str = item.get("start", "")
-                try:
-                    # Parsear el start con timezone
-                    start_dt = datetime.fromisoformat(start_str)
-                    # Convertir a UTC
-                    if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=UTC)
-                    else:
-                        start_dt = start_dt.astimezone(UTC)
-                    
-                    hora = start_dt.hour
-                    minuto = start_dt.minute
-                    precio = float(item.get("price", 0.0))
-                    tramo = hora * 4 + (minuto // 15)
-                    datos_por_tramo[tramo] = precio
-                    continue
-                except ValueError as e:
-                    _LOGGER.warning(f"Error parseando start {start_str}: {e}")
-            
-            # Formato 1: lista de dicts con hour, minute, price
-            if isinstance(item, dict):
-                hora = item.get("hour", 0)
-                minuto = item.get("minute", 0)
-                precio = item.get("price", 0.0)
-                tramo = hora * 4 + (minuto // 15)
-                datos_por_tramo[tramo] = precio
-                continue
-            
-            # Formato 2: lista de dicts con datetime y price
-            if isinstance(item, dict) and "datetime" in item:
-                dt = item.get("datetime")
-                if isinstance(dt, str):
-                    # Parsear datetime string
-                    try:
-                        dt_obj = datetime.fromisoformat(dt)
-                        if dt_obj.tzinfo is None:
-                            dt_obj = dt_obj.replace(tzinfo=UTC)
-                        else:
-                            dt_obj = dt_obj.astimezone(UTC)
-                        hora = dt_obj.hour
-                        minuto = dt_obj.minute
-                        precio = item.get("price", 0.0)
-                        tramo = hora * 4 + (minuto // 15)
-                        datos_por_tramo[tramo] = precio
-                    except ValueError:
-                        _LOGGER.debug("Descartando tramo con datetime no válido: %s", dt)
-                        continue
-                elif isinstance(dt, datetime):
-                    dt_obj = dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
-                    hora = dt_obj.hour
-                    minuto = dt_obj.minute
-                    precio = item.get("price", 0.0)
-                    tramo = hora * 4 + (minuto // 15)
-                    datos_por_tramo[tramo] = precio
-                continue
-            
-            # Formato 3: lista de strings (JSON)
-            if isinstance(item, str):
-                try:
-                    import json
-                    parsed = json.loads(item)
-                    if isinstance(parsed, dict):
-                        # Intentar formato OMIE en string
-                        if "start" in parsed and "price" in parsed:
-                            start_str = parsed.get("start", "")
-                            start_dt = datetime.fromisoformat(start_str)
-                            if start_dt.tzinfo is None:
-                                start_dt = start_dt.replace(tzinfo=UTC)
-                            else:
-                                start_dt = start_dt.astimezone(UTC)
-                            hora = start_dt.hour
-                            minuto = start_dt.minute
-                            precio = float(parsed.get("price", 0.0))
-                            tramo = hora * 4 + (minuto // 15)
-                            datos_por_tramo[tramo] = precio
-                        else:
-                            hora = parsed.get("hour", 0)
-                            minuto = parsed.get("minute", 0)
-                            precio = parsed.get("price", 0.0)
-                            tramo = hora * 4 + (minuto // 15)
-                            datos_por_tramo[tramo] = precio
-                except (ValueError, TypeError):
-                    _LOGGER.debug("Descartando elemento JSON no válido en la lista de precios")
-                    continue
+        """Normaliza datos OMIE ({start, end, price}) a 96 Ranuras."""
+        if not datos:
+            return []
 
-        # Crear 96 tramos (24 horas * 4 tramos de 15 min).
-        # Si tenemos datos con start/end, usamos esos timestamps directamente
-        if datos and isinstance(datos, list) and len(datos) > 0 and isinstance(datos[0], dict) and "start" in datos[0]:
-            _LOGGER.debug("Procesando formato OMIE con start/end")
-            for item in datos:
-                start_str = item.get("start", "")
-                try:
-                    start_dt = datetime.fromisoformat(start_str)
-                    if start_dt.tzinfo is None:
-                        start_dt = start_dt.replace(tzinfo=UTC)
+        ranuras = []
+        for item in datos:
+            try:
+                start_dt = datetime.fromisoformat(item["start"])
+                if start_dt.tzinfo is None:
+                    start_dt = start_dt.replace(tzinfo=UTC)
+                else:
+                    start_dt = start_dt.astimezone(UTC)
+
+                end_str = item.get("end")
+                if end_str:
+                    end_dt = datetime.fromisoformat(end_str)
+                    if end_dt.tzinfo is None:
+                        end_dt = end_dt.replace(tzinfo=UTC)
                     else:
-                        start_dt = start_dt.astimezone(UTC)
-                    
-                    precio = float(item.get("price", 0.0))
-                    _LOGGER.debug(f"Creando ranura: {start_dt.isoformat()} - {precio}")
-                    
-                    # Obtener el end time si está disponible
-                    end_str = item.get("end", "")
-                    try:
-                        end_dt = datetime.fromisoformat(end_str)
-                        if end_dt.tzinfo is None:
-                            end_dt = end_dt.replace(tzinfo=UTC)
-                        else:
-                            end_dt = end_dt.astimezone(UTC)
-                    except ValueError:
-                        end_dt = start_dt + timedelta(minutes=15)
-                    
-                    ranura = Ranura(
+                        end_dt = end_dt.astimezone(UTC)
+                else:
+                    end_dt = start_dt + timedelta(minutes=15)
+
+                ranuras.append(
+                    Ranura(
                         fecha_hora_utc=start_dt,
-                        precio_eur_kwh=precio,
+                        precio_eur_kwh=float(item["price"]),
                         fuente="omie",
                         fecha_publicacion=datetime.now(tz=UTC),
                         fecha_hora_fin_utc=end_dt,
                     )
-                    ranuras.append(ranura)
-                except ValueError as e:
-                    _LOGGER.warning(f"Error creando ranura desde {start_str}: {e}")
-                    continue
-            
-            # Si tenemos menos de 96 tramos, rellenar con 0.0 continuando
-            # la línea temporal desde la última ranura conocida.
-            if len(ranuras) < 96:
-                _LOGGER.warning(f"Solo se obtuvieron {len(ranuras)} tramos, rellenando a 96")
-                num_reales = len(ranuras)
-                if num_reales:
-                    inicio_relleno = (
-                        ranuras[-1].fecha_hora_fin_utc
-                        or ranuras[-1].fecha_hora_utc + timedelta(minutes=15)
-                    )
-                else:
-                    inicio_relleno = datetime(fecha.year, fecha.month, fecha.day, tzinfo=UTC)
-                for i in range(num_reales, 96):
-                    fecha_hora_utc = inicio_relleno + timedelta(minutes=15 * (i - num_reales))
-                    ranura = Ranura(
-                        fecha_hora_utc=fecha_hora_utc,
-                        precio_eur_kwh=0.0,
-                        fuente="omie",
-                        fecha_publicacion=datetime.now(tz=UTC),
-                        fecha_hora_fin_utc=fecha_hora_utc + timedelta(minutes=15),
-                    )
-                    ranuras.append(ranura)
-            
-            return ranuras
-        
-        # Formatos antiguos (sin start/end)
-        if not ranuras:  # Solo si no tenemos ranuras del formato OMIE
-            for tramo in range(96):
-                hora = tramo // 4
-                minuto = (tramo % 4) * 15
-                
-                precio = datos_por_tramo.get(tramo, None)
-                if precio is None:
-                    precio = 0.0
-                
-                fecha_hora_utc = datetime(
-                    fecha.year, fecha.month, fecha.day, hora, minuto, tzinfo=UTC
                 )
-                
-                ranura = Ranura(
-                    fecha_hora_utc=fecha_hora_utc,
-                    precio_eur_kwh=float(precio),
-                    fuente="omie",
-                    fecha_publicacion=datetime.now(tz=UTC),
-                    fecha_hora_fin_utc=fecha_hora_utc + timedelta(minutes=15),
-                )
-                ranuras.append(ranura)
-        
+            except (KeyError, ValueError) as e:
+                _LOGGER.warning("Ranura descartada: %s (%s)", item, e)
+                continue
+
+        if len(ranuras) != 96:
+            _LOGGER.warning(
+                "Se esperaban 96 ranuras para %s, se obtuvieron %d",
+                fecha, len(ranuras),
+            )
+
         return ranuras
 
     async def obtener_precios_del_dia(self, fecha: date) -> list:
         """Obtiene los precios para un día específico."""
-        def _read_cache():
-            """Operación bloqueante: leer cache."""
-            cache_file = self._dir_cache / f"{fecha.strftime('%Y-%m-%d')}.json"
-            if cache_file.exists():
-                with open(cache_file, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            return None
+        cache_file = self._dir_cache / f"{fecha.strftime('%Y-%m-%d')}.json"
 
-        def _write_cache(ranuras: list):
-            """Operación bloqueante: escribir cache."""
-            self._dir_cache.mkdir(parents=True, exist_ok=True)
-            cache_file = self._dir_cache / f"{fecha.strftime('%Y-%m-%d')}.json"
-            cache_data = [
-                {
-                    "fecha_hora_utc": r.fecha_hora_utc.isoformat(),
-                    "precio_eur_kwh": r.precio_eur_kwh,
-                    "fuente": r.fuente,
-                    "fecha_publicacion": r.fecha_publicacion.isoformat(),
-                    "fecha_hora_fin_utc": r.fecha_hora_fin_utc.isoformat() if r.fecha_hora_fin_utc else None,
-                }
-                for r in ranuras
-            ]
-            with open(cache_file, "w", encoding="utf-8") as f:
-                json.dump(cache_data, f, ensure_ascii=False, indent=2)
-
-        # Verificar cache      
-        if self.config.usar_cache:
+        # 1) Caché
+        if self.config.usar_cache and cache_file.exists():
             try:
-                cached_data = await self.hass.async_add_executor_job(_read_cache)
-                # Solo usar caché si tiene datos reales
-                if cached_data and len(cached_data) == 96:
-                    _LOGGER.info(
-                        "Cache válida para %s → %d ranuras",
-                        fecha, len(cached_data),
-                    )
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached = json.load(f)
+                if cached and len(cached) == 96:
                     return [
                         Ranura(
                             fecha_hora_utc=datetime.fromisoformat(d["fecha_hora_utc"]),
@@ -481,95 +191,61 @@ class ClienteOmie:
                                 if d.get("fecha_hora_fin_utc") else None
                             ),
                         )
-                        for d in cached_data
+                        for d in cached
                     ]
             except (OSError, ValueError) as e:
-                _LOGGER.warning("Error leyendo cache: %s", e)     
+                _LOGGER.warning("Error leyendo cache %s: %s", cache_file, e)
 
-        # 
-        # Obtener datos de la fuente prioritaria (cascada de fallbacks)
-        # 
+        # 2) Cascada de fuentes
         datos = None
         fuente = None
 
-        # 1) Integración OMIE
         if self.config.fuente_prioritaria == "omie" and "omie" in self.hass.config.components:
             try:
                 datos = await self._obtener_desde_integracion_omie(fecha)
                 fuente = "omie"
-                _LOGGER.info(
-                    "Datos obtenidos de OMIE: tipo=%s, longitud=%d",
-                    type(datos).__name__, len(datos or []),
-                )
-            except ErrorIntegracionNoDisponible as e:
-                _LOGGER.warning("Integración OMIE no disponible: %s", e)
-                datos = None
-            # Fallback: cualquier fallo de la fuente externa OMIE
-            # (integración, red, publicación pendiente...) cae al siguiente proveedor.
             except Exception as e:  # noqa: BLE001
-                _LOGGER.warning("Error al obtener datos de OMIE: %s (%s)", e, type(e).__name__)
-                if "have not been published yet" in str(e):
-                    _LOGGER.warning("Los precios de mañana no están publicados aún, usando fallback")
+                _LOGGER.warning("OMIE falló: %s", e)
                 datos = None
 
-        # 2) REData
         if not datos:
             try:
                 datos = await self._obtener_desde_redata(fecha)
                 fuente = "redata"
-                _LOGGER.info(
-                    "Datos obtenidos de REData: tipo=%s, longitud=%d",
-                    type(datos).__name__, len(datos or []),
-                )
             except Exception as e:  # noqa: BLE001
-                _LOGGER.warning("Error al obtener datos de REData: %s", e)
+                _LOGGER.warning("REData falló: %s", e)
                 datos = None
 
-        # 3) ESIOS
-        if not datos:
-            try:
-                datos = await self._obtener_desde_esios(fecha)
-                fuente = "esios"
-                _LOGGER.info(
-                    "Datos obtenidos de ESIOS: tipo=%s, longitud=%d",
-                    type(datos).__name__, len(datos or []),
-                )
-            except Exception as e:  # noqa: BLE001
-                _LOGGER.warning("Error al obtener datos de ESIOS: %s", e)
-                datos = None
-
-        # 4) Descarte si todos los precios son 0.0 (fuente devolvió "vacío")
-        if datos and all(
-            isinstance(d, dict) and float(d.get("price", 0)) == 0.0
-            for d in datos
-        ):
-            _LOGGER.warning("Todos los precios recibidos son 0.0, descartando fuente")
-            datos = None
-            fuente = None
-
-        # 5) Si seguimos sin datos, abortamos y dejamos que suba la excepción
         if not datos:
             raise ErrorFuenteOmie("Todas las fuentes fallaron")
 
-        # 
-        # Normalizar datos a 96 tramos de 15 min
-        # 
-        _LOGGER.info(
-            "Normalizando datos para %s. Tipo=%s, Longitud=%d",
-            fecha, type(datos).__name__, len(datos),
-        )
+        # 3) Normalizar
         ranuras = self._normalizar_a_15min(datos, fecha)
-        _LOGGER.info("Normalización completada: %d ranuras", len(ranuras))
+        for r in ranuras:
+            r.fuente = fuente
 
-        # Actualizar fuente en todas las ranuras
-        for ranura in ranuras:
-            ranura.fuente = fuente
-
-        # Guardar en cache
-        if self.config.usar_cache:
+        # 4) Persistir caché
+        if self.config.usar_cache and ranuras:
             try:
-                await self.hass.async_add_executor_job(_write_cache, ranuras)
-            except (OSError, ValueError) as e:
+                self._dir_cache.mkdir(parents=True, exist_ok=True)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(
+                        [
+                            {
+                                "fecha_hora_utc": r.fecha_hora_utc.isoformat(),
+                                "precio_eur_kwh": r.precio_eur_kwh,
+                                "fuente": r.fuente,
+                                "fecha_publicacion": r.fecha_publicacion.isoformat(),
+                                "fecha_hora_fin_utc": (
+                                    r.fecha_hora_fin_utc.isoformat()
+                                    if r.fecha_hora_fin_utc else None
+                                ),
+                            }
+                            for r in ranuras
+                        ],
+                        f, ensure_ascii=False, indent=2,
+                    )
+            except OSError as e:
                 _LOGGER.warning("Error escribiendo cache: %s", e)
 
         return ranuras

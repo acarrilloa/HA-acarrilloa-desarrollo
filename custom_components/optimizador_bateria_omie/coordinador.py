@@ -1,5 +1,5 @@
 """Coordinador de datos para la integración Optimizador Batería OMIE."""
-# versión 0.6.5
+# versión 0.6.6
 
 import logging
 from dataclasses import dataclass
@@ -231,16 +231,19 @@ class CoordinadorDatosOmie(DataUpdateCoordinator):
 
     def obtener_clasificacion_actual(self) -> str | None:
         """Obtiene la clasificación actual."""
-        if not self._datos or not self._datos.clasificaciones_hoy:
+        if (
+            not self._datos
+            or not self._datos.clasificaciones_hoy
+            or not self._datos.precios_hoy
+        ):
             return None
 
         ahora = datetime.now(tz=UTC)
-        # La clasificación está en la misma posición que el tramo horario
-        minuto_actual = ahora.hour * 60 + ahora.minute
-        tramo = minuto_actual // 15
-        
-        if tramo < len(self._datos.clasificaciones_hoy):
-            return self._datos.clasificaciones_hoy[tramo]
+        primera = self._datos.precios_hoy[0].fecha_hora_utc
+        idx = int((ahora - primera).total_seconds() // 900)  # 900 s = 15 min
+
+        if 0 <= idx < len(self._datos.clasificaciones_hoy):
+            return self._datos.clasificaciones_hoy[idx]
         
         return None
 

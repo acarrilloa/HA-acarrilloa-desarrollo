@@ -1,5 +1,7 @@
 """Entidades (sensores) para la integración Optimizador Batería OMIE."""
+# versión 0.6.6
 
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.update_coordinator import (
@@ -22,6 +24,8 @@ from custom_components.optimizador_bateria_omie.const import (
 
 class SensorBase(CoordinatorEntity):
     """Clase base para los sensores."""
+
+    _attr_has_entity_name = True
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -53,17 +57,10 @@ class SensorPrecioActual(SensorBase):
         return "€/kWh"
 
     @property
-    def suggested_unit_of_measurement(self) -> str:
-        """Unidad de medida sugerida."""
-        return "€"
-
-    @property
-    def native_value(self) -> float | str:
+    def native_value(self) -> float | None:
         """Valor nativo del sensor."""
         precio = self.coordinator.obtener_precio_actual()
-        if precio is not None:
-            return round(precio, 4)
-        return STATE_UNAVAILABLE
+        return round(precio, 4) if precio is not None else None
 
     @property
     def available(self) -> bool:
@@ -98,17 +95,10 @@ class SensorPrecioEfectivo(SensorBase):
         return "€/kWh"
 
     @property
-    def suggested_unit_of_measurement(self) -> str:
-        """Unidad de medida sugerida."""
-        return "€"
-
-    @property
-    def native_value(self) -> float | str:
+    def native_value(self) -> float | None:
         """Valor nativo del sensor."""
         precio = self.coordinator.obtener_precio_efectivo_actual()
-        if precio is not None:
-            return round(precio, 4)
-        return STATE_UNAVAILABLE
+        return round(precio, 4) if precio is not None else None
 
     @property
     def available(self) -> bool:
@@ -137,10 +127,7 @@ class SensorPrecioClasificacion(SensorBase):
     @property
     def native_value(self) -> str | None:
         """Valor nativo del sensor."""
-        clasificacion = self.coordinator.obtener_clasificacion_actual()
-        if clasificacion is not None:
-            return clasificacion
-        return STATE_UNAVAILABLE
+        return self.coordinator.obtener_clasificacion_actual()
 
     @property
     def available(self) -> bool:
@@ -167,12 +154,12 @@ class SensorPrecioEstadisticas(SensorBase):
         return "€/kWh"
 
     @property
-    def native_value(self) -> float | str:
+    def native_value(self) -> float | None:
         """Valor nativo del sensor (mediana)."""
         estadisticas = self.coordinator.obtener_estadisticas_actual()
         if estadisticas:
             return estadisticas.get(ATTR_MEDIANA, 0)
-        return STATE_UNAVAILABLE
+        return None
 
     @property
     def available(self) -> bool:
